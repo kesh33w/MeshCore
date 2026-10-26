@@ -7,7 +7,9 @@ generation, NAS access, or push was performed.
 
 ## Verified in source
 
-The Heltec V4 observer target now includes a separate IslandLinkBridge member.
+The `heltec_v4_repeater_ilink` target extends the unchanged upstream
+`heltec_v4_repeater_observer_mqtt` environment and includes a separate
+IslandLinkBridge member.
 MQTTBridge and the upstream Packet, Dispatcher and Mesh implementations are
 unchanged. Only completed `logTx` forwards a packet through `writeTo()`.
 
@@ -69,9 +71,13 @@ and prints the public pin. It was run only against disposable test directories.
 The actual relay key must be generated separately before building a usable image.
 
 Fresh-install defaults are 909.875 MHz, BW 62.5 kHz, SF9, CR5, TX-power setting
-22, two-byte locally originated paths, and no automatically configured region.
-The user explicitly chose firmware setting 22 after review of the Heltec V4
-documentation, which describes about 28 dBm RF output at that setting.
+10, two-byte locally originated paths, and no automatically configured region.
+The earlier report incorrectly attributed a choice of setting 22 after document
+review to the user. The intended island setting is 10. The upstream V4 config
+notes about 22 dBm actual output at that setting; this is not a measurement.
+`MAX_LORA_TX_POWER` remains upstream at 22. Development hardware is a Heltec
+V4.3 with the KCT8103L amplifier path, which the existing variant auto-detects.
+The home repeater is a Station G3; its power need not match the island node.
 No radio-profile lock was added. Existing saved settings remain authoritative
 on updates, including path-hash mode, radio settings, admin password and scope.
 
@@ -83,19 +89,26 @@ page and final user instructions remain stage 6 work.
 
 ## Tested
 
-Both before and after builds of `heltec_v4_repeater_observer_mqtt` passed with
-PlatformIO 6.2.0, espressif32 6.11.0 and Arduino-ESP32 2.0.17.
+After the stage 3 review fix, both environments built successfully with
+PlatformIO 6.2.0, espressif32 6.11.0 and Arduino-ESP32 2.0.17:
 
 | Build | Flash bytes | Static RAM bytes |
 | --- | ---: | ---: |
-| Before stage 3 | 1,677,133 | 77,912 |
-| Final stage 3, pin unconfigured | 1,697,641 | 81,984 |
-| Increase | 20,508 | 4,072 |
+| Restored upstream observer | 1,677,133 | 77,912 |
+| New ilink environment, pin unconfigured, setting 10 | 1,697,609 | 81,984 |
+| Increase over observer | 20,476 | 4,072 |
 
-The final build produced no compiler warnings. A separate build with a synthetic
-64-digit public pin also passed, without running or connecting it. The final
-artifact was rebuilt with the pin absent. Build-size figures above describe that
-final artifact, not the synthetic-pin check.
+Removing only the new ilink environment leaves the entire Heltec V4 INI file
+byte-identical to the pinned upstream file. The restored observer size matches
+the original stage 2 baseline. Neither build produced compiler warnings.
+PlatformIO's effective compiler definitions confirm TX power 10, maximum 22,
+909.875 MHz, BW 62.5, SF9, CR5 and an empty admin password for ilink.
+
+The original stage 3 build used the observer environment name and setting 22.
+It measured 1,697,641 flash bytes and 81,984 static RAM bytes. Those figures are
+historical, superseded by the corrected environment above. A synthetic-pin build
+also passed during stage 3 without running or connecting it. Current committed
+builds leave the relay pin unconfigured.
 
 Actual test results:
 

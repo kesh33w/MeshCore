@@ -1,6 +1,6 @@
-# Island link frame validation
+# Island link host tests
 
-Stage 2 only. Run from the repository root with a host Clang installation:
+Stages 2 and 3. Run the core tests from the repository root with host Clang:
 
 ```sh
 sh tests/island_link/run.sh
@@ -40,6 +40,39 @@ are accepted; malformed ones must match the oracle's rejection.
 on installations with libFuzzer. The default script runs the deterministic
 driver, not libFuzzer.
 
+The same runner tests fragmented/coalesced length-prefixed records, keepalives,
+90-second silence detection, reconnect backoff and timer rollover. It also
+compiles the actual `IslandLinkRadio.cpp` admission and transmit methods with
+host queues. Those tests cover validate-before-allocation, both echo directions,
+queue pressure, packet reserve, origin tracking, stale frames and rapid off/on
+session changes. That target uses a deterministic hash mock, not cryptography.
+
+Additional tests:
+
+```sh
+python3 tests/island_link/relay_identity_script_test.py
+sh tests/island_link/run_crypto.sh
+sh tests/island_link/run_dm.sh
+```
+
+The Python test requires OpenSSL and creates only temporary synthetic keys. The
+crypto runner downloads official mbedTLS 2.28.7, matching the ESP32 SDK version,
+or uses an existing source directory supplied as `MBEDTLS_SOURCE`. It tests the
+actual identity and pin-policy code with fake NVS and real cryptography, including
+in-memory TLS handshakes. It creates no sockets or deployment credentials.
+
+The DM runner uses the Crypto dependency installed by the observer PlatformIO
+build. It links real Mesh, Dispatcher, Packet, identity, crypto, packet-manager,
+seen-table and bridge radio code. Fake radios and small application callbacks
+exercise two-island flood delivery, PATH exchange, a direct reply and ACKs for
+both hash widths. It does not instantiate BaseChatMesh or the full repeater app.
+The runner currently uses the macOS linker option `-dead_strip`.
+
+The DM run initially found an existing negative left shift in
+`lib/ed25519/ge.c:359`. Shift sanitization is disabled only for the vendored
+ed25519 C sources. AddressSanitizer and other UndefinedBehaviorSanitizer checks
+remain enabled. Upstream crypto was not changed.
+
 ## Caller contract and limits
 
 The caller supplies existing bytes and their actual length as `size_t`. For an
@@ -49,5 +82,6 @@ in-range length, the pointer must cover that many readable bytes. Call
 `Packet::readFrom`. Do not narrow the length to `uint8_t` before validation.
 
 The fixed storage that receives network bytes and TLS connection buffers are
-outside this validator. Transport framing, firmware admission, echo suppression,
-DM routing, TLS, enrollment, and persistence are not implemented or tested here.
+outside the validator. Host tests do not establish actual ESP32 entropy, Wi-Fi
+and MQTT coexistence, watchdog behavior, flash persistence, or RF performance.
+See `STAGE3.md` for implementation boundaries and build measurements.

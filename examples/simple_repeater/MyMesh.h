@@ -31,6 +31,10 @@
 #include "helpers/esp32/WebConfigServer.h"   // defines WITH_WEBCONFIG on ESP32
 #endif
 
+#ifdef WITH_ILINK
+#include "helpers/bridges/IslandLinkBridge.h"
+#endif
+
 #ifdef WITH_SNMP
 #include "helpers/SNMPAgent.h"
 #endif
@@ -107,6 +111,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks
   NodePrefs _prefs;
   ClientACL  acl;
   CommonCLI _cli;
+#ifdef WITH_ILINK
+  IslandLinkBridge _ilink;
+  bool _ilink_receiving = false;
+  bool _ilink_observer_start_pending = false;
+  uint32_t _ilink_config_at = 0;
+#endif
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   uint8_t reply_path[MAX_PATH_SIZE];
   uint8_t reply_path_len;
@@ -364,6 +374,11 @@ public:
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
+#ifdef WITH_ILINK
+    _ilink_observer_start_pending = enable;
+    if (enable && !_ilink.claimObserverNetwork()) return;
+    _ilink_observer_start_pending = false;
+#endif
     if (!bridge) {
 #ifdef WITH_MQTT_BRIDGE
       bridge = new MQTTBridge(&_prefs, _cli.getObserverPrefs(), _mgr, getRTCClock(), &self_id);

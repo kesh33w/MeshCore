@@ -84,6 +84,9 @@
 #define LAZY_CONTACTS_WRITE_DELAY    5000
 
 void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float snr) {
+#ifdef WITH_ILINK
+  if (_ilink_receiving) return; // no neighbor/RF measurement from relayed ingress
+#endif
 #if MAX_NEIGHBOURS // check if neighbours enabled
   // find existing neighbour, else use least recently updated
   uint32_t oldest_timestamp = 0xFFFFFFFF;
@@ -111,6 +114,11 @@ void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float sn
 }
 
 uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood) {
+#ifdef WITH_ILINK
+  // Fresh public images require a password set locally before any RF login,
+  // including the upstream empty-password guest/ACL paths.
+  if (_prefs.password[0] == '\0') return 0;
+#endif
   ClientInfo* client = NULL;
   if (data[0] == 0) {   // blank password, just check if sender is in ACL
     client = acl.getClient(sender.pub_key, PUB_KEY_SIZE);
@@ -582,6 +590,9 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 }
 
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+#ifdef WITH_ILINK
+  _ilink.sendPacket(pkt);
+#endif
 #if defined(WITH_MQTT_NEIGHBORS)
   if (neighbor_discover_active && pkt == neighbor_discover_request
       && neighbor_discover_next < neighbor_discover_count) {
@@ -662,6 +673,9 @@ uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
 }
 
 mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
+#ifdef WITH_ILINK
+  _ilink_receiving = _ilink.takeReceivedOrigin(pkt);
+#endif
   if (pkt->getRouteType() == ROUTE_TYPE_TRANSPORT_FLOOD) {
     recv_pkt_region = region_map.findMatch(pkt, REGION_DENY_FLOOD);
   } else if (pkt->getRouteType() == ROUTE_TYPE_FLOOD) {
@@ -673,7 +687,11 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
   } else {
     recv_pkt_region = NULL;
   }
-  return Mesh::onRecvPacket(pkt);
+  auto action = Mesh::onRecvPacket(pkt);
+#ifdef WITH_ILINK
+  _ilink_receiving = false;
+#endif
+  return action;
 }
 
 void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,
@@ -1018,6 +1036,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
     : mesh::Mesh(radio, ms, rng, rtc, *createObserverPacketManager(32), tables),
       region_map(key_store), temp_map(key_store),
       _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
+#ifdef WITH_ILINK
+      _ilink(_mgr),
+#endif
       telemetry(MAX_PACKET_PAYLOAD - 4),
       discover_limiter(4, 120),  // max 4 every 2 minutes
       anon_limiter(4, 180)   // max 4 every 3 minutes
@@ -1051,6 +1072,11 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.node_lat = ADVERT_LAT;
   _prefs.node_lon = ADVERT_LON;
   StrHelper::strncpy(_prefs.password, ADMIN_PASSWORD, sizeof(_prefs.password));
+#ifdef WITH_ILINK
+  // Defaults only. loadPrefs() restores existing installation settings later.
+  _prefs.password[0] = '\0';
+  _prefs.path_hash_mode = 1;
+#endif
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
   _prefs.bw = LORA_BW;
@@ -1258,6 +1284,13 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_MQTT_BRIDGE
   _alerter.begin(&_prefs, _cli.getObserverPrefs(), this, this);
   _alerter.setBridge(bridge);
+#endif
+
+#ifdef WITH_ILINK
+  _ilink.begin();
+  auto ilink_obs = _cli.getObserverPrefs();
+  _ilink.configureNetwork(ilink_obs->wifi_ssid, ilink_obs->wifi_password, ilink_obs->wifi_power_save);
+  _ilink.allowNetworkFallback(!bridge || (!bridge->isRunning() && !bridge->isStopUnproven()));
 #endif
 
 #if defined(WITH_WEBCONFIG) && !defined(WEBCONFIG_NO_AUTO_AP)
@@ -1628,6 +1661,21 @@ void MyMesh::buildStatsJson(char* buf, size_t buf_size) {
 #endif
 
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
+#ifdef WITH_ILINK
+  if (strcmp(command, "get ilink") == 0) {
+    _ilink.formatStatus(reply, 160);
+    return;
+  }
+  if (strcmp(command, "set ilink on") == 0 || strcmp(command, "set ilink off") == 0) {
+    _ilink.setEnabled(strcmp(command, "set ilink on") == 0);
+    strcpy(reply, "OK - requested; get ilink shows state");
+    return;
+  }
+  if (strncmp(command, "set ilink", 9) == 0) {
+    strcpy(reply, "Err - use set ilink on or set ilink off");
+    return;
+  }
+#endif
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
       region_map = temp_map;  // copy over the temp instance as new current map
@@ -1745,6 +1793,13 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 #endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
+#ifdef WITH_ILINK
+    if (strncmp(command, "set wifi.", 9) == 0) {
+      auto obs = _cli.getObserverPrefs();
+      _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save);
+      if (_prefs.bridge_enabled && (!bridge || !bridge->isRunning())) setBridgeState(true);
+    }
+#endif
   }
 }
 
@@ -1752,6 +1807,19 @@ void MyMesh::loop() {
   // Check radio FIRST to ensure we don't miss incoming packets
   // MQTT processing runs in a separate FreeRTOS task on Core 0, so we don't call bridge.loop() here
   mesh::Mesh::loop();
+
+#ifdef WITH_ILINK
+  const uint32_t ilink_now = millis();
+  _ilink.loop(ilink_now);
+  if (_ilink_observer_start_pending) setBridgeState(true);
+  _ilink.allowNetworkFallback(!_ilink_observer_start_pending &&
+    (!bridge || (!bridge->isRunning() && !bridge->isStopUnproven())));
+  if (uint32_t(ilink_now - _ilink_config_at) >= 1000) {
+    _ilink_config_at = ilink_now;
+    auto obs = _cli.getObserverPrefs();
+    _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save);
+  }
+#endif
 
 #ifdef WITH_MQTT_BRIDGE
   // A timed-out stop keeps the bridge down until the MQTT task acknowledges it.
@@ -2400,6 +2468,9 @@ bool MyMesh::startNeighborDiscover(char* reply) {
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
+#ifdef WITH_ILINK
+  if (_ilink.isEnabled()) return true;
+#endif
 #if defined(WITH_BRIDGE)
   if (bridge && bridge->isRunning()) return true;  // bridge needs WiFi radio, can't sleep
 #endif

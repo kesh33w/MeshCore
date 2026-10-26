@@ -1343,9 +1343,23 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       }
     } else if (memcmp(command, "password ", 9) == 0) {
       // change admin password
+#ifdef WITH_ILINK
+      if (command[9] == '\0' || strlen(&command[9]) >= sizeof(_prefs->password)) {
+        strcpy(reply, "Err - password is empty or too long");
+        return;
+      }
+      if (_prefs->password[0] == '\0' && sender_timestamp != 0) {
+        strcpy(reply, "Err - set first password over USB serial");
+        return;
+      }
+#endif
       StrHelper::strncpy(_prefs->password, &command[9], sizeof(_prefs->password));
       savePrefs();
+#ifdef WITH_ILINK
+      strcpy(reply, "OK - password saved");
+#else
       sprintf(reply, "password now: %s", _prefs->password);   // echo back just to let admin know for sure!!
+#endif
     } else if (memcmp(command, "clear stats", 11) == 0) {
       _callbacks->clearStats();
       strcpy(reply, "(OK - stats reset)");

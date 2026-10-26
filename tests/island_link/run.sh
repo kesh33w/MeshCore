@@ -22,6 +22,14 @@ set -- "$@" -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined \
   -fno-sanitize-recover=all
 "$cxx" "$@" "$repo/tests/island_link/frame_test.cpp" -o "$build/frame_test"
 "$build/frame_test"
+"$cxx" "$@" "$repo/tests/island_link/protocol_test.cpp" -o "$build/protocol_test"
+"$build/protocol_test"
+"$cxx" -I "$repo/tests/island_link/mocks" -I "$repo/test/mocks" "$@" \
+  -DWITH_ILINK -DESP32_PLATFORM \
+  "$repo/tests/island_link/radio_test.cpp" \
+  "$repo/src/helpers/bridges/IslandLinkRadio.cpp" "$repo/src/Packet.cpp" \
+  -o "$build/radio_test"
+"$build/radio_test"
 "$cxx" "$@" -DISLAND_LINK_STANDALONE_FUZZ \
   "$repo/tests/island_link/frame_fuzz.cpp" -o "$build/frame_fuzz"
 "$build/frame_fuzz"

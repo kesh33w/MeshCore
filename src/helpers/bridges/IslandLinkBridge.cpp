@@ -25,7 +25,9 @@ namespace {
 constexpr uint32_t kHandshakeTimeout = 15000;
 constexpr uint32_t kConnectTimeout = 5000;
 constexpr uint32_t kQueueMaxAge = 2000;
-constexpr uint32_t kWorkerStack = 16384;
+// ESP32 mbedTLS PEM writers use large stack buffers during first-boot key
+// creation. 16 KiB overflowed on V4.3; retain room for the nested crypto calls.
+constexpr uint32_t kWorkerStack = 32768;
 
 struct TlsSession {
   mbedtls_net_context socket;
@@ -180,9 +182,10 @@ void IslandLinkBridge::formatStatus(char* reply, size_t capacity) const {
     snprintf(state, sizeof(state), "%s%srelay pin not configured", detail,
              detail[0] ? "; " : "");
   else strlcpy(state, pending && !fatal ? "saving" : names[current], sizeof(state));
-  snprintf(reply, capacity, "%s %s\nkey:%s\ntx:%lu rx:%lu drop:%lu", isEnabled() ? "on" : "off",
+  snprintf(reply, capacity, "%s %s\nkey:%s\ntx:%lu rx:%lu drop:%lu\nstack_free_min:%lu", isEnabled() ? "on" : "off",
     state, _identity_ready.load() ? _fingerprint : "pending",
-    (unsigned long)_sent.load(), (unsigned long)_received.load(), (unsigned long)_dropped.load());
+    (unsigned long)_sent.load(), (unsigned long)_received.load(), (unsigned long)_dropped.load(),
+    (unsigned long)_stack_free_min.load());
 }
 
 void IslandLinkBridge::taskEntry(void* argument) {
@@ -217,6 +220,7 @@ void IslandLinkBridge::worker() {
   bool network_started = false;
   uint32_t retry_since = millis(), retry_delay = 0;
   uint32_t active_revision = _request.load();
+  uint32_t stack_sample_at = 0;
   uint32_t session_generation = 0, connected_at = 0;
   bool backoff_reset = false;
   uint8_t wire[MAX_TRANS_UNIT + 1];
@@ -234,6 +238,10 @@ void IslandLinkBridge::worker() {
   };
 
   for (;;) {
+    if (uint32_t(millis() - stack_sample_at) >= 1000) {
+      stack_sample_at = millis();
+      _stack_free_min.store(uxTaskGetStackHighWaterMark(nullptr) * sizeof(StackType_t));
+    }
     const uint32_t revision = _request.load();
     if (revision != saved_revision) {
       storage_ok = prefs.putBool("enabled", (revision & 1u) != 0) == 1;

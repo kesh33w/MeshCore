@@ -170,3 +170,36 @@ enforcement and ESP Web Tools page remain stages 4 through 6. Single-byte and
 transport-code packets remain excluded exactly as specified. An existing saved
 single-byte path mode or scoped traffic will not become eligible merely by
 enabling island-link.
+
+## Accepted V4.3 smoke test, 2026-10-26
+
+This follow-up supersedes the earlier hardware and stack estimates above.
+Tested: the original 16 KiB IslandLink worker stack overflowed during the first
+Wi-Fi-associated key generation, inside `mbedtls_pk_write_key_pem`. Increasing
+the worker stack to 32 KiB fixed that observed crash. `get ilink` now reports
+`stack_free_min` in bytes, sampled by the worker once per second and published
+atomically so the radio loop does not scan stacks.
+
+Tested: key generation left a minimum 16,060 bytes of worker stack free;
+identity reload after reboot left 19,548 bytes. The fingerprint survived reboot.
+Wi-Fi idle measured 193,368 bytes free internal heap and a largest block of
+180,212 bytes. With one sacmesh MQTT session, the last complete sample measured
+174,020 bytes free and a largest block of 163,828 bytes. The relay pin remained
+unconfigured, so these measurements exclude an active island TLS session.
+The fixed build used 1,697,705 flash bytes and 81,992 static RAM bytes; the stack
+increase also costs 16 KiB of runtime internal RAM. The existing validator,
+framing/timer, radio admission/send and one-million-input fuzz tests passed.
+
+The user accepted Task 1 and approved the stack fix. The brief observation
+ended when the user unplugged USB. It is not a completed soak test.
+
+Open for the first live link test, all unverified:
+
+- Worker minimum free stack during the island TLS handshake.
+- Free internal heap and largest free block with observer MQTT TLS and island
+  TLS both connected, including handshake peaks.
+- A full 30-minute soak with reset, crash and watchdog monitoring.
+- RF login refusal before the first admin password and successful login after
+  it is set over USB.
+
+No live-link gate above is satisfied by the host tests or brief smoke test.

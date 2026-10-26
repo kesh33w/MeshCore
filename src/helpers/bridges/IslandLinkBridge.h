@@ -59,6 +59,7 @@ class IslandLinkBridge {
   std::atomic<uint32_t> _persisted_request{0};
   std::atomic<State> _state{Starting};
   std::atomic<uint32_t> _sent{0}, _received{0}, _dropped{0};
+  std::atomic<uint32_t> _stack_free_min{0};
   char _fingerprint[65] = {};
   static void taskEntry(void* argument);
   void worker();

@@ -20,6 +20,8 @@ echo "PASS: unoptimized validator object has no external symbol dependencies"
 
 set -- "$@" -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined \
   -fno-sanitize-recover=all
+"$cxx" "$@" "$repo/tests/island_link/command_test.cpp" -o "$build/command_test"
+"$build/command_test"
 "$cxx" "$@" "$repo/tests/island_link/frame_test.cpp" -o "$build/frame_test"
 "$build/frame_test"
 "$cxx" "$@" "$repo/tests/island_link/protocol_test.cpp" -o "$build/protocol_test"

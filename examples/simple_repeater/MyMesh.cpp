@@ -9,6 +9,9 @@
 #include <WiFi.h>
 #endif
 #include <helpers/OtaChannel.h>
+#ifdef WITH_ILINK
+#include <helpers/bridges/IslandLinkCommand.h>
+#endif
 #if defined(WITH_MQTT_NEIGHBORS)
 #include <helpers/MQTTConnectionPolicy.h>  // kSyncedClockEpoch
 #endif
@@ -1076,6 +1079,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   // Defaults only. loadPrefs() restores existing installation settings later.
   _prefs.password[0] = '\0';
   _prefs.path_hash_mode = 1;
+  _prefs.disable_fwd = 0;
 #endif
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
@@ -1662,6 +1666,9 @@ void MyMesh::buildStatsJson(char* buf, size_t buf_size) {
 
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
 #ifdef WITH_ILINK
+  if (strncmp(command, "get ilink", 9) == 0 || strncmp(command, "set ilink", 9) == 0) {
+    island_link::trimCommandWhitespace(command);
+  }
   if (strcmp(command, "get ilink") == 0) {
     _ilink.formatStatus(reply, 160);
     return;

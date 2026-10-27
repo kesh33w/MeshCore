@@ -1,3 +1,43 @@
+## Temporary SACMesh island link
+
+The `island-link` branch adds a temporary TLS link for a Heltec V4 RF island
+behind legacy repeaters that cannot forward multibyte paths. Only 2-byte and
+3-byte path traffic crosses the link. Remove this workaround when those
+repeaters are upgraded. Installation and enrollment instructions are at
+[the SACMesh island-link page](https://sacmesh.org/island-link/).
+
+The base PlatformIO environment is `heltec_v4_repeater_ilink`. It cannot connect
+without a relay SPKI SHA-256 pin. Define `heltec_v4_repeater_ilink_pinned` in the
+ignored `platformio.local.ini`, using the public relay pin:
+
+```ini
+[env:heltec_v4_repeater_ilink_pinned]
+extends = env:heltec_v4_repeater_ilink
+build_flags =
+  ${env:heltec_v4_repeater_ilink.build_flags}
+  -D ILINK_RELAY_SPKI_SHA256='"84d458d83daf18387c1a0afe60b61a1f5c8de53380e47317d94bfc221737666b"'
+```
+
+The qualified 2026-10-27 release uses source commit
+`153fce500a4183ccb22659f6c5d11cee40e23db0`. Its reproducible build fixes the
+RadioLib compile timestamp and maps debug paths back to the original source
+directory. From the source root, with the qualified toolchain and libraries:
+
+```sh
+export SOURCE_DATE_EPOCH=1793108956
+export PLATFORMIO_BUILD_FLAGS="-fdebug-prefix-map=$PWD=/Users/dan/island-release-20261027/self-service-enrollment-20261027/firmware-work/source"
+export PLATFORMIO_BUILD_DIR="$PWD/.pio/build"
+pio run -e heltec_v4_repeater_ilink_pinned
+pio run -e heltec_v4_repeater_ilink_pinned -t mergebin
+```
+
+Keep the qualified toolchain/library inputs unchanged for byte-for-byte
+reproduction; the timestamp and path flags alone do not pin dependencies.
+The qualified app SHA-256 is
+`293091a927d4db25830704ad560a396f31f92cbf8398d63060cb35948ab8b84e`;
+the full-install SHA-256 is
+`1174246718c4d2aa50de52924eb0416c23589fc450f7c68f62ea1fa1e276b0c6`.
+
 ## About MeshCore
 
 MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.

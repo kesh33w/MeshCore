@@ -25,7 +25,11 @@
 #endif
 #endif
 #ifndef MQTT_DEFAULT_SLOT2_PRESET
+#ifdef WITH_ILINK
+#define MQTT_DEFAULT_SLOT2_PRESET "none"
+#else
 #define MQTT_DEFAULT_SLOT2_PRESET "analyzer-eu"
+#endif
 #endif
 #ifndef MQTT_DEFAULT_SLOT3_PRESET
 #define MQTT_DEFAULT_SLOT3_PRESET "none"

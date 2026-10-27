@@ -4,6 +4,8 @@ Run `sh tests/observer_defaults/run.sh` from the repository root. The tests use
 the production MQTT initializer, JSON serializer and legacy binary decoder with
 the existing host Stream mock. All three builds run with ASan and UBSan.
 
+The Island Link build enables only slot 1 with the sacmesh preset and SMF IATA;
+slots 2 through 6 are disabled. Ordinary defaults retain analyzer-us/analyzer-eu.
 The builds check Island Link defaults, unchanged ordinary defaults and explicit
 compile-time overrides. Saved JSON choices of `none`, an empty preset or IATA,
 a custom broker and a different existing preset override the fresh defaults.

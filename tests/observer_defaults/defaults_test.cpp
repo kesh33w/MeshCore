@@ -69,7 +69,7 @@ int main() {
   const MQTTPrefs fresh = defaults();
   assert(strcmp(fresh.mqtt_slot_preset[0], EXPECT_SLOT1_PRESET) == 0);
   assert(strcmp(fresh.mqtt_iata, EXPECT_IATA) == 0);
-  assert(strcmp(fresh.mqtt_slot_preset[1], "analyzer-eu") == 0);
+  assert(strcmp(fresh.mqtt_slot_preset[1], EXPECT_SLOT2_PRESET) == 0);
   for (int slot = 2; slot < MQTT_PREFS_SLOT_COUNT; ++slot) {
     assert(strcmp(fresh.mqtt_slot_preset[slot], "none") == 0);
   }

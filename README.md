@@ -7,7 +7,8 @@ repeaters are upgraded. Installation and enrollment instructions are at
 [the SACMesh island-link page](https://sacmesh.org/island-link/).
 
 Fresh Island Link installs report to SACMesh CoreScope by default, using MQTT
-slot 1 preset `sacmesh` and IATA `SMF`. Run `set mqtt1.preset none` to disable
+slot 1 preset `sacmesh` and IATA `SMF`. Slots 2 through 6 are disabled, so
+SACMesh is the only default MQTT server. Run `set mqtt1.preset none` to disable
 that feed. Updates restore saved observer settings after applying defaults.
 
 The base PlatformIO environment is `heltec_v4_repeater_ilink`. It cannot connect

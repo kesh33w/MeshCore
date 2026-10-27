@@ -4,7 +4,7 @@
 
 #include <string.h>
 #include <MeshCore.h>
-#include "CommonCLI.h"
+#include "MQTTPrefsStorage.h"
 #include "MQTTPacketFilter.h"
 #include "MQTTPresets.h"
 
@@ -16,7 +16,13 @@
 //   -D MQTT_DEFAULT_TIMEZONE_OFFSET=-5
 
 #ifndef MQTT_DEFAULT_SLOT1_PRESET
+#ifdef WITH_ILINK
+// Applied before persisted observer settings are restored. A saved none/custom
+// preset must remain authoritative on updates.
+#define MQTT_DEFAULT_SLOT1_PRESET "sacmesh"
+#else
 #define MQTT_DEFAULT_SLOT1_PRESET "analyzer-us"
+#endif
 #endif
 #ifndef MQTT_DEFAULT_SLOT2_PRESET
 #define MQTT_DEFAULT_SLOT2_PRESET "analyzer-eu"
@@ -35,7 +41,11 @@
 #endif
 
 #ifndef MQTT_DEFAULT_IATA
+#ifdef WITH_ILINK
+#define MQTT_DEFAULT_IATA "SMF"
+#else
 #define MQTT_DEFAULT_IATA ""
+#endif
 #endif
 
 #ifndef MQTT_DEFAULT_TIMEZONE

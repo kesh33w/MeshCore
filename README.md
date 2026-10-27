@@ -6,6 +6,10 @@ behind legacy repeaters that cannot forward multibyte paths. Only 2-byte and
 repeaters are upgraded. Installation and enrollment instructions are at
 [the SACMesh island-link page](https://sacmesh.org/island-link/).
 
+Fresh Island Link installs report to SACMesh CoreScope by default, using MQTT
+slot 1 preset `sacmesh` and IATA `SMF`. Run `set mqtt1.preset none` to disable
+that feed. Updates restore saved observer settings after applying defaults.
+
 The base PlatformIO environment is `heltec_v4_repeater_ilink`. It cannot connect
 without a relay SPKI SHA-256 pin. Define `heltec_v4_repeater_ilink_pinned` in the
 ignored `platformio.local.ini`, using the public relay pin:
@@ -18,7 +22,7 @@ build_flags =
   -D ILINK_RELAY_SPKI_SHA256='"84d458d83daf18387c1a0afe60b61a1f5c8de53380e47317d94bfc221737666b"'
 ```
 
-The qualified 2026-10-27 release uses source commit
+The earlier qualified 2026-10-27 enrollment release uses source commit
 `153fce500a4183ccb22659f6c5d11cee40e23db0`. Its reproducible build fixes the
 RadioLib compile timestamp and maps debug paths back to the original source
 directory. From the source root, with the qualified toolchain and libraries:

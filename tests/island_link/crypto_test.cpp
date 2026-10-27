@@ -73,6 +73,30 @@ static void recalculateChecksum(std::vector<uint8_t>& blob) {
         "test mutation checksum");
 }
 
+static void checkName(island_link::Identity& identity, const char* name,
+                      const char* expected) {
+  const std::string pin(identity.spki_sha256_hex);
+  const auto stored = fake_nvs.blob;
+  const unsigned writes = fake_nvs.writes;
+  check(island_link::refreshClientCertificate(identity, name), "refresh named cert");
+  check(pin == identity.spki_sha256_hex && stored == fake_nvs.blob &&
+        writes == fake_nvs.writes, "rename preserves SPKI and exact stored key/blob");
+  mbedtls_x509_crt cert;
+  mbedtls_x509_crt_init(&cert);
+  check(mbedtls_x509_crt_parse(&cert,
+      reinterpret_cast<const uint8_t*>(identity.client_cert_pem),
+      std::strlen(identity.client_cert_pem) + 1) == 0, "parse named certificate");
+  check(cert.subject.val.len == std::strlen(expected) &&
+        std::memcmp(cert.subject.val.p, expected, cert.subject.val.len) == 0 &&
+        !cert.subject.next && pinFor(cert) == pin,
+        "exact bounded CN without injected subject attributes and original SPKI");
+  mbedtls_x509_crt_free(&cert);
+  const std::string previous_cert(identity.client_cert_pem);
+  check(island_link::refreshClientCertificate(identity, name) &&
+        previous_cert == identity.client_cert_pem,
+        "same name reuses exact cert on reconnect");
+}
+
 static void testPersistence() {
   fake_nvs.reset();
   island_link::Identity deferred;
@@ -90,6 +114,13 @@ static void testPersistence() {
   const std::string first_pin(first.spki_sha256_hex);
   const std::string first_cert(first.client_cert_pem);
   const std::vector<uint8_t> first_blob = fake_nvs.blob;
+  checkName(first, "Kesh909-test", "Kesh909-test");
+  checkName(first, "  Island Two  ", "Island Two");
+  checkName(first, "x,CN=evil\n\x01", "x_CN_evil__");
+  checkName(first, "123456789012345678901234567890123456789", "12345678901234567890123456789012");
+  checkName(first, "   ", "Island Link");
+  checkName(first, nullptr, "Island Link");
+
 
   island_link::Identity restarted;
   check(island_link::loadOrCreateIdentity(restarted, false) ==

@@ -216,6 +216,14 @@ int main(int argc, char** argv) {
         relayAccepts(accepted),
         "pinned self-signed TLS and authorized client certificate succeed");
 
+  const std::string enrolled_pin(authorized.spki_sha256_hex);
+  check(island_link::refreshClientCertificate(authorized, "New advert name"),
+        "renew client certificate with advertised name");
+  HandshakeResult renamed = handshake(argv[1], argv[2], authorized,
+      relay_pin, enrolled_pin);
+  check(renamed.client_complete && renamed.server_complete && relayAccepts(renamed),
+        "renamed certificate accepted with original enrolled SPKI");
+
   std::string wrong_pin(64, '0');
   if (wrong_pin == relay_pin) wrong_pin[0] = '1';
   HandshakeResult rejected_pin = handshake(argv[1], argv[2], authorized,

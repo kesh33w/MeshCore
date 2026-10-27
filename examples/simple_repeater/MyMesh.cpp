@@ -1293,7 +1293,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_ILINK
   _ilink.begin();
   auto ilink_obs = _cli.getObserverPrefs();
-  _ilink.configureNetwork(ilink_obs->wifi_ssid, ilink_obs->wifi_password, ilink_obs->wifi_power_save);
+  _ilink.configureNetwork(ilink_obs->wifi_ssid, ilink_obs->wifi_password, ilink_obs->wifi_power_save, _prefs.node_name);
   _ilink.allowNetworkFallback(!bridge || (!bridge->isRunning() && !bridge->isStopUnproven()));
 #endif
 
@@ -1803,7 +1803,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 #ifdef WITH_ILINK
     if (strncmp(command, "set wifi.", 9) == 0) {
       auto obs = _cli.getObserverPrefs();
-      _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save);
+      _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save, _prefs.node_name);
       if (_prefs.bridge_enabled && (!bridge || !bridge->isRunning())) setBridgeState(true);
     }
 #endif
@@ -1824,7 +1824,7 @@ void MyMesh::loop() {
   if (uint32_t(ilink_now - _ilink_config_at) >= 1000) {
     _ilink_config_at = ilink_now;
     auto obs = _cli.getObserverPrefs();
-    _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save);
+    _ilink.configureNetwork(obs->wifi_ssid, obs->wifi_password, obs->wifi_power_save, _prefs.node_name);
   }
 #endif
 

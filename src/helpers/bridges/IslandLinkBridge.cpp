@@ -76,6 +76,15 @@ struct TlsSession {
     mbedtls_net_free(&socket);
     if (ready) mbedtls_ssl_session_reset(&ssl);
   }
+  bool replaceCertificate(const island_link::Identity& identity) {
+    // The SSL config retains this object's address, so replace its contents
+    // only after disconnect, before the next handshake.
+    mbedtls_x509_crt_free(&certificate);
+    mbedtls_x509_crt_init(&certificate);
+    return mbedtls_x509_crt_parse(&certificate,
+        reinterpret_cast<const unsigned char*>(identity.client_cert_pem),
+        strlen(identity.client_cert_pem) + 1) == 0;
+  }
   bool connect(const std::atomic<uint32_t>& revision,
                uint32_t expected_revision) {
     close();
@@ -149,9 +158,10 @@ bool IslandLinkBridge::claimObserverNetwork() {
   return true;
 }
 
-void IslandLinkBridge::configureNetwork(const char* ssid, const char* password, uint8_t power_save) {
+void IslandLinkBridge::configureNetwork(const char* ssid, const char* password, uint8_t power_save, const char* advert_name) {
   if (!_config) return;
   NetworkConfig config = {};
+  strlcpy(config.advert_name, advert_name, sizeof(config.advert_name));
   strlcpy(config.ssid, ssid, sizeof(config.ssid));
   strlcpy(config.password, password, sizeof(config.password));
   config.power_save = power_save;
@@ -307,6 +317,10 @@ void IslandLinkBridge::worker() {
         _state.store(Retry); vTaskDelay(pdMS_TO_TICKS(50)); continue;
       }
       _state.store(Connecting);
+      if (!island_link::refreshClientCertificate(identity, network_config.advert_name)) {
+        _state.store(IdentityError); return;
+      }
+      if (tls.ready && !tls.replaceCertificate(identity)) { _state.store(IdentityError); return; }
       if (!tls.ready && !tls.initialize(identity)) { _state.store(ResourceError); return; }
       if (!tls.connect(_request, active_revision)) {
         disconnect(); retry_since = millis(); retry_delay = backoff.nextDelayMs();

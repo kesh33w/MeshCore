@@ -18,7 +18,8 @@ class IslandLinkBridge {
   bool takeReceivedOrigin(const mesh::Packet* packet);
   void setEnabled(bool enabled);
   void formatStatus(char* reply, size_t capacity) const;
-  void configureNetwork(const char* ssid, const char* password, uint8_t power_save);
+  void configureNetwork(const char* ssid, const char* password, uint8_t power_save,
+                        const char* advert_name);
   // Must succeed before starting an observer task. Never waits on the radio loop.
   bool claimObserverNetwork();
   void allowNetworkFallback(bool allow) { _network_fallback.store(allow); }
@@ -35,6 +36,7 @@ class IslandLinkBridge {
     uint8_t bytes[MAX_TRANS_UNIT];
   };
   struct NetworkConfig {
+    char advert_name[33];
     char ssid[32];
     char password[64];
     uint8_t power_save;

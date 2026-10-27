@@ -43,6 +43,12 @@ enum class IdentityStatus {
 // load regardless of allow_generation.
 IdentityStatus loadOrCreateIdentity(Identity& out, bool allow_generation);
 
+// Certificate display name only. Refreshes in memory using the existing key;
+// never writes NVS or generates a replacement key. Call with Wi-Fi entropy ready.
+// ASCII letters, digits, spaces, '.', '_' and '-' are retained, other bytes
+// become '_'. The name is bounded to 32 bytes and empty names use Island Link.
+bool refreshClientCertificate(Identity& identity, const char* advert_name);
+
 // True only for 64 hexadecimal digits. An absent pin keeps the link disabled.
 bool isValidSpkiPin(const char* pin);
 

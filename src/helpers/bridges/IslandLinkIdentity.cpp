@@ -16,6 +16,7 @@
 #include <mbedtls/x509_crt.h>
 #include <nvs.h>
 #include <string.h>
+#include <stdio.h>
 
 namespace island_link {
 namespace {
@@ -153,7 +154,8 @@ bool validateStored(const StoredIdentity& blob, Identity& out) {
   return valid;
 }
 
-bool createIdentity(Identity& out) {
+bool createIdentity(Identity& out, const char* subject = "CN=IslandLink device",
+                    bool reuse_key = false) {
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context rng;
   mbedtls_pk_context key;
@@ -168,13 +170,18 @@ bool createIdentity(Identity& out) {
   static const uint8_t personalisation[] = "IslandLink device identity v1";
   bool okay = mbedtls_ctr_drbg_seed(&rng, mbedtls_entropy_func, &entropy,
                                     personalisation, sizeof(personalisation) - 1) == 0;
-  if (okay) okay = mbedtls_pk_setup(&key,
-                   mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) == 0;
-  if (okay) okay = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1,
-                   mbedtls_pk_ec(key), mbedtls_ctr_drbg_random, &rng) == 0;
-  if (okay) okay = mbedtls_pk_write_key_pem(&key,
-                   reinterpret_cast<uint8_t*>(out.private_key_pem),
-                   sizeof(out.private_key_pem)) == 0;
+  if (reuse_key) {
+    if (okay) okay = parsePrivateKey(key, out.private_key_pem,
+                                     strlen(out.private_key_pem) + 1);
+  } else {
+    if (okay) okay = mbedtls_pk_setup(&key,
+                     mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY)) == 0;
+    if (okay) okay = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1,
+                     mbedtls_pk_ec(key), mbedtls_ctr_drbg_random, &rng) == 0;
+    if (okay) okay = mbedtls_pk_write_key_pem(&key,
+                     reinterpret_cast<uint8_t*>(out.private_key_pem),
+                     sizeof(out.private_key_pem)) == 0;
+  }
 
   uint8_t serial_bytes[16];
   if (okay) okay = mbedtls_ctr_drbg_random(&rng, serial_bytes,
@@ -190,9 +197,9 @@ bool createIdentity(Identity& out) {
     mbedtls_x509write_crt_set_issuer_key(&cert, &key);
     mbedtls_x509write_crt_set_md_alg(&cert, MBEDTLS_MD_SHA256);
     okay = mbedtls_x509write_crt_set_subject_name(&cert,
-                  "CN=IslandLink device") == 0 &&
+                  subject) == 0 &&
            mbedtls_x509write_crt_set_issuer_name(&cert,
-                  "CN=IslandLink device") == 0 &&
+                  subject) == 0 &&
            mbedtls_x509write_crt_set_serial(&cert, &serial) == 0 &&
            mbedtls_x509write_crt_set_validity(&cert,
                   "20200101000000", "20991231235959") == 0 &&
@@ -320,6 +327,39 @@ IdentityStatus loadOrCreateIdentity(Identity& out, bool allow_generation) {
     return IdentityStatus::StorageError;
   }
   return IdentityStatus::Created;
+}
+
+bool refreshClientCertificate(Identity& identity, const char* advert_name) {
+  char name[33] = {};
+  size_t length = 0;
+  if (advert_name) {
+    while (*advert_name == ' ') ++advert_name;
+    while (*advert_name && length < sizeof(name) - 1) {
+      const unsigned char c = static_cast<unsigned char>(*advert_name++);
+      name[length++] = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       (c >= '0' && c <= '9') || c == ' ' || c == '.' ||
+                       c == '_' || c == '-' ? c : '_';
+    }
+  }
+  while (length && name[length - 1] == ' ') name[--length] = 0;
+  if (!length) memcpy(name, "Island Link", sizeof("Island Link"));
+
+  mbedtls_x509_crt current;
+  mbedtls_x509_crt_init(&current);
+  bool matches = false;
+  if (mbedtls_x509_crt_parse(&current,
+          reinterpret_cast<const uint8_t*>(identity.client_cert_pem),
+          strlen(identity.client_cert_pem) + 1) == 0) {
+    const mbedtls_x509_name& cn = current.subject;
+    matches = MBEDTLS_OID_CMP(MBEDTLS_OID_AT_CN, &cn.oid) == 0 &&
+              !cn.next && cn.val.len == strlen(name) &&
+              memcmp(cn.val.p, name, cn.val.len) == 0;
+  }
+  mbedtls_x509_crt_free(&current);
+  if (matches) return true;
+  char subject[36];
+  snprintf(subject, sizeof(subject), "CN=%s", name);
+  return createIdentity(identity, subject, true);
 }
 
 bool isValidSpkiPin(const char* pin) {

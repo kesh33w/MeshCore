@@ -1,6 +1,6 @@
-# SACMesh V4.3 TFT source
+# Kesh's OpenHop bridge: V4.3 TFT source
 
-This branch starts at `d664d89df66bdacc1319900a2e2d152fa31b9dc9` in the MeshCore observer-firmware lineage. It contains the SACMesh private link, enrollment, screen and Wi-Fi setup source used for the Heltec V4.3 TFT work. MeshCore's MIT license remains in `license.txt`.
+This branch starts at `d664d89df66bdacc1319900a2e2d152fa31b9dc9` in the MeshCore observer-firmware lineage. It contains the private link, enrollment, screen and Wi-Fi setup source for the Heltec V4.3 TFT in Kesh's personal OpenHop bridge project. Kesh uses sacmesh.org to host project downloads. MeshCore's MIT license remains in `license.txt`.
 
 The checked-in `platformio.sacmesh.example.ini` selects a build that generates its device identity during installation. Copy it to the ignored `platformio.local.ini` before building. No Wi-Fi password, device private key, client certificate, admin password or installed identity is included in this branch.
 

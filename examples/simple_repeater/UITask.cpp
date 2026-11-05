@@ -2,6 +2,11 @@
 #include "target.h"
 #include <Arduino.h>
 #include <helpers/CommonCLI.h>
+#ifdef PRIVATE_OBSERVER_BASE
+#include "PrivateSetup.h"
+#include <helpers/PrivateLinkState.h>
+static bool private_setup_on_release = false;
+#endif
 
 #ifdef DISPLAY_REDRAW_ON_CHANGE
 #include <helpers/ui/DisplayFrameSignature.h>
@@ -96,12 +101,30 @@ void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* fi
 #ifdef DISPLAY_TOUCH_TOGGLE
   _touch.begin();
 #endif
+#ifdef TFT_TOUCH_PROBE
+  Wire1.begin(47, 48, 100000);
+  Wire1.setTimeOut(8);
+  Wire1.beginTransmission(0x2E);
+  const uint8_t touch_ack = Wire1.endTransmission();
+  Serial.printf("TFT touch probe: bus=1 SDA=47 SCL=48 reset=untouched ack=%u\n", touch_ack);
+  Wire1.beginTransmission(0x2E);
+  Wire1.write(0x00);
+  const uint8_t touch_reg = Wire1.endTransmission(false);
+  const uint8_t touch_len = Wire1.requestFrom((uint8_t)0x2E, (uint8_t)16);
+  Serial.printf("TFT touch probe: register=%u bytes=%u report=", touch_reg, touch_len);
+  while (Wire1.available()) Serial.printf("%02x", Wire1.read());
+  Serial.println();
+#endif
 #ifdef DISPLAY_REDRAW_ON_CHANGE
   _frame_valid = false;
 #endif
 
 #if defined(PIN_USER_BTN) && defined(DISPLAY_CLASS)
   user_btn.begin();
+#endif
+
+#ifdef TFT_WIFI_SETUP
+  _wifi_touch.begin(static_cast<ST7789LCDDisplay*>(_display), _wifi_callbacks);
 #endif
 
   // strip off dash and commit hash by changing dash to null terminator
@@ -118,6 +141,17 @@ void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* fi
 }
 
 void UITask::renderCurrScreen() {
+#ifdef PRIVATE_OBSERVER_BASE
+  if (private_setup_on_release) {
+    _display->setTextSize(1);
+    _display->setColor(UIColor::primary_txt);
+    _display->setCursor(0, 14);
+    _display->print("Release button");
+    _display->setCursor(0, 30);
+    _display->print("for WiFi setup");
+    return;
+  }
+#endif
   char tmp[80];
 #ifdef DISPLAY_ACTIVITY_DASHBOARD
   _rows_valid = false;
@@ -217,7 +251,21 @@ void UITask::renderCurrScreen() {
     sprintf(tmp, "BW: %03.2f CR: %d", _node_prefs->bw, _node_prefs->cr);
     _display->print(tmp);
 
-#ifdef WITH_MQTT_BRIDGE
+#ifdef PRIVATE_OBSERVER_BASE
+    const bool wifi_connected = WiFi.status() == WL_CONNECTED;
+    if (wifi_connected) {
+      IPAddress ip = WiFi.localIP();
+      _display->setCursor(0, 10);
+      snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+      _display->print(tmp);
+    }
+    _display->setTextSize(1);
+    _display->setColor(UIColor::primary_txt);
+    _display->setCursor(0, 40);
+    _display->print(wifi_connected ? "WiFi: connected" : "WiFi: disconnected");
+    _display->setCursor(0, 50);
+    _display->print(private_remote::private_link_status(wifi_connected));
+#elif defined(WITH_MQTT_BRIDGE)
     // Display IP address for MQTT bridge devices
     if (WiFi.status() == WL_CONNECTED) {
       IPAddress ip = WiFi.localIP();
@@ -264,7 +312,16 @@ uint32_t UITask::getFrameSignature() {
   snprintf(tmp, sizeof(tmp), "BW: %03.2f CR: %d", _node_prefs->bw, _node_prefs->cr);
   signature = DisplayFrameSignature::append(signature, tmp);
 
-#if defined(WITH_MQTT_BRIDGE) && !defined(DISPLAY_ACTIVITY_DASHBOARD)
+#if defined(PRIVATE_OBSERVER_BASE) && !defined(DISPLAY_ACTIVITY_DASHBOARD)
+  const bool wifi_connected = WiFi.status() == WL_CONNECTED;
+  signature = DisplayFrameSignature::append(signature, wifi_connected ? "wifi-up" : "wifi-down");
+  signature = DisplayFrameSignature::append(signature, private_remote::private_link_status(wifi_connected));
+  if (wifi_connected) {
+    IPAddress ip = WiFi.localIP();
+    snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+    signature = DisplayFrameSignature::append(signature, tmp);
+  }
+#elif defined(WITH_MQTT_BRIDGE) && !defined(DISPLAY_ACTIVITY_DASHBOARD)
   if (WiFi.status() == WL_CONNECTED) {
     IPAddress ip = WiFi.localIP();
     snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
@@ -353,6 +410,10 @@ void UITask::toggleDisplay(const char* source) {
 #endif
 
 void UITask::loop() {
+#ifdef TFT_WIFI_SETUP
+  applyDisplayFlip();
+  if (_wifi_touch.loop(_observer_prefs && _observer_prefs->display_flip)) return;
+#endif
 #if defined(PIN_USER_BTN) && defined(DISPLAY_CLASS)
   int ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {
@@ -373,9 +434,28 @@ void UITask::loop() {
     _auto_off = millis() + displayTimeoutMillis();   // extend auto-off timer
 #endif
   } else if (ev == BUTTON_EVENT_LONG_PRESS) {
+#if defined(PRIVATE_OBSERVER_BASE) && defined(WITH_WEBCONFIG)
+      if (!WebConfigServer::getSetupInfo(NULL, 0, NULL, 0)) {
+        Serial.println("Opening WiFi setup; saved settings retained");
+        private_setup_on_release = true;
+        _display->turnOn();
+        _display->startFrame();
+        renderCurrScreen();
+        _display->endFrame();
+      }
+#else
       _display->turnOn();
       Serial.println("Powering Off");
       _powering_off_at = millis() + POWEROFF_DELAY; 
+#endif
+  }
+#endif
+
+#if defined(PRIVATE_OBSERVER_BASE) && defined(PIN_USER_BTN) && defined(DISPLAY_CLASS)
+  // GPIO0 is also a boot strap. Restart only after the user lets go.
+  if (private_setup_on_release) {
+    if (!user_btn.isPressed()) private_remote::request_setup_restart();
+    return;  // Keep the release instruction visible while the button is held.
   }
 #endif
 

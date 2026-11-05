@@ -53,6 +53,9 @@ public:
   }
 #endif
   bool begin();
+#ifdef TFT_WIFI_SETUP
+  Adafruit_ST7789& nativeCanvas() { return display; }
+#endif
 
   bool isOn() override { return _isOn; }
   void turnOn() override;

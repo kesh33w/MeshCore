@@ -17,6 +17,9 @@
 #include <helpers/MQTTPacketFilter.h>
 #include <helpers/MQTTPresets.h>
 #include <helpers/WebConfigKeys.h>
+#ifdef PRIVATE_OBSERVER_BASE
+#include <helpers/PrivateSetupPolicy.h>
+#endif
 #include <helpers/WifiPowerSavePolicy.h>
 #include <helpers/bridges/MQTTBridge.h>
 
@@ -311,7 +314,7 @@ bool WebConfigServer::startSetupMode(char reply[]) {
   _network_locked = true;
   _was_setup_ap = true;
   _last_activity = millis();
-  WiFi.scanNetworks(true);  // pre-populate the SSID picker
+  WiFi.scanNetworks(true, false, false, 600);  // pre-populate the SSID picker
 
   sprintf(reply, "WebConfig AP started: join '%s' then open http://%s/", _ap_ssid, ip.toString().c_str());
   return true;
@@ -404,6 +407,14 @@ void WebConfigServer::createServer() {
 
 void WebConfigServer::requestStop() {
   if (_mode == MODE_OFF && !_stopping) return;
+  // Stop new submissions, but finish every already accepted command on the
+  // loop task before teardown. This also balances onConfigBatchStart/End.
+  if (_batch_state == BATCH_PENDING) {
+    _stop_after_batch = true;
+    detachRoutes();
+    return;
+  }
+  _stop_after_batch = false;
   // Detach first. Any request whose headers/body finish parsing after this point
   // is dispatched by the permanent host as 503 and never sees this session.
   detachRoutes();
@@ -450,6 +461,7 @@ void WebConfigServer::finalizeTeardown() {
   }
   _initial_setup = false;
   _stopping = false;
+  _stop_after_batch = false;
   _stop_warn_at = 0;
   _stop_warned = false;
   _reboot_at = 0;
@@ -528,6 +540,10 @@ void WebConfigServer::tick(uint32_t now) {
   if (_dns) _dns->processNextRequest();
 
   if (_batch_state == BATCH_PENDING) drainBatch(now);
+  if (_stop_after_batch && _batch_state != BATCH_PENDING) {
+    requestStop();
+    return;
+  }
 
   if (WebConfigBatch::rebootDue(_reboot_at, now)) {
     Serial.printf("WC: rebooting now (%s)\n", _batch_reboot_armed ? "confirmed" : "fallback");
@@ -766,6 +782,35 @@ bool WebConfigServer::checkAuth(AsyncWebServerRequest* req) {
 // Handlers (async_tcp task - no CLI/prefs writes, no radio access)
 // ---------------------------------------------------------------------------
 
+const char* WebConfigServer::privateSetupBlocker() const {
+#ifdef PRIVATE_TESTER_FULL_SETUP
+  // Tester chooses an unassigned RF profile in the normal setup wizard.
+  return "";
+#endif
+#if defined(PRIVATE_OBSERVER_BASE)
+#ifdef PRIVATE_WIFI_ONLY_SETUP
+  const bool provisioned_build = true;
+#else
+  const bool provisioned_build = false;
+#endif
+  return private_remote::private_setup_blocker(provisioned_build, _prefs->password);
+#else
+  return "private_build_not_provisioned";
+#endif
+}
+
+bool WebConfigServer::restrictToWifiSetup() const {
+#if defined(PRIVATE_OBSERVER_BASE) && defined(PRIVATE_WIFI_ONLY_SETUP)
+  return _mode == MODE_SETUP;
+#else
+  return false;
+#endif
+}
+
+bool WebConfigServer::hasPrivateSetupDefaults() const {
+  return restrictToWifiSetup() && privateSetupBlocker()[0] == 0;
+}
+
 void WebConfigServer::handleRoot(AsyncWebServerRequest* req) {
   if (_mode == MODE_OFF) { req->send(503); return; }
   _last_activity = millis();
@@ -785,10 +830,15 @@ void WebConfigServer::handleStatus(AsyncWebServerRequest* req) {
   if (_mode == MODE_OFF) { req->send(503); return; }
   bool authed = checkAuth(req);
 
-  DynamicJsonDocument doc(640);
+  DynamicJsonDocument doc(768);
   doc["mode"] = (_mode == MODE_SETUP) ? "setup" : "lan";
   doc["auth"] = authed;
-  doc["needs_setup"] = !mqttNetworkSetupComplete(_obs);
+  doc["needs_setup"] = !mqttNetworkSetupComplete(_obs) && !hasPrivateSetupDefaults();
+  doc["wifi_only_setup"] = hasPrivateSetupDefaults();
+#ifdef PRIVATE_OBSERVER_BASE
+  // Non-secret preparation result. Never expose the saved password or length.
+  doc["private_setup_blocker"] = privateSetupBlocker();
+#endif
   doc["name"] = (const char*)_prefs->node_name;
   char node_id[17];
   for (int i = 0; i < 8; i++) sprintf(&node_id[i * 2], "%02x", _pub_key[i]);
@@ -917,6 +967,24 @@ void WebConfigServer::handleConfigGet(AsyncWebServerRequest* req) {
   if (_mode == MODE_OFF) { req->send(503); return; }
   if (!checkAuth(req)) { req->send(401, "application/json", "{\"error\":\"auth\"}"); return; }
 
+  if (restrictToWifiSetup()) {
+    // Preserve the page's object shape without returning maintenance settings
+    // (including the SNMP community) over the unauthenticated setup AP.
+    DynamicJsonDocument limited(768);
+    {
+      WCLock lock(_mux);
+      limited.createNestedObject("radio");
+      limited.createNestedObject("mqtt").createNestedArray("slots");
+      JsonObject wifi = limited.createNestedObject("wifi");
+      wifi["ssid"] = (const char*)_obs->wifi_ssid;
+      wifi["pwd"] = _obs->wifi_password[0] ? SECRET_SENTINEL : "";
+    }
+    AsyncResponseStream* res = req->beginResponseStream("application/json");
+    serializeJson(limited, *res);
+    req->send(res);
+    return;
+  }
+
   DynamicJsonDocument doc(6144);
   {
     WCLock lock(_mux);
@@ -1025,6 +1093,17 @@ void WebConfigServer::handleConfigPost(AsyncWebServerRequest* req) {
   }
   JsonObject set = doc["set"];
 
+  // Reject the entire request before it can claim or populate the batch.
+  // This restriction is independent of UI visibility and of admin readiness.
+  if (restrictToWifiSetup()) {
+    for (JsonPair kv : set) {
+      if (!private_remote::wifi_setup_key_allowed(kv.key().c_str())) {
+        req->send(403, "application/json", "{\"error\":\"Wi-Fi setup only\"}");
+        return;
+      }
+    }
+  }
+
   WCLock lock(_mux);
   // A DONE batch stays readable until the next POST claims the slot, so a
   // client that lost the result response can re-poll instead of failing.
@@ -1067,7 +1146,7 @@ void WebConfigServer::handleConfigPost(AsyncWebServerRequest* req) {
   // First onboarding is not complete until the known factory password has
   // been replaced. Enforce this server-side so the Advanced editor or a crafted
   // request cannot save WiFi and strand the node with the default password.
-  if (_initial_setup && !set.containsKey("password") &&
+  if (_initial_setup && !hasPrivateSetupDefaults() && !set.containsKey("password") &&
       (reboot_after || set.containsKey("wifi.ssid"))) {
     req->send(400, "application/json", "{\"error\":\"admin password required for initial setup\"}");
     return;
@@ -1272,6 +1351,10 @@ void WebConfigServer::handleConfigResult(AsyncWebServerRequest* req) {
 // normally and the connection drops — the UI warns before sending them.
 void WebConfigServer::handleCliPost(AsyncWebServerRequest* req) {
   if (_mode == MODE_OFF) { req->send(503); return; }
+  if (restrictToWifiSetup()) {
+    req->send(403, "application/json", "{\"error\":\"Wi-Fi setup only; CLI requires authenticated LAN maintenance\"}");
+    return;
+  }
   if (!checkAuth(req)) { req->send(401, "application/json", "{\"error\":\"auth\"}"); return; }
   if (req->_tempObject == NULL) {
     req->send(413, "application/json", "{\"error\":\"body too large\"}");
@@ -1379,7 +1462,7 @@ void WebConfigServer::handleCliPost(AsyncWebServerRequest* req) {
   // LAN still holding the factory password is a known credential on someone
   // else's network. The terminal warned about this client-side, which is a
   // reminder, not a rule — a pasted script or a direct POST ignored it.
-  if (_initial_setup && !seq_sets_pwd && !_admin_pwd_set &&
+  if (_initial_setup && !hasPrivateSetupDefaults() && !seq_sets_pwd && !_admin_pwd_set &&
       (defer_reboot || seq_sets_ssid)) {
     req->send(400, "application/json",
               "{\"error\":\"admin password required for initial setup — "
@@ -1409,6 +1492,10 @@ void WebConfigServer::handleCliPost(AsyncWebServerRequest* req) {
 
 void WebConfigServer::handleCliResult(AsyncWebServerRequest* req) {
   if (_mode == MODE_OFF) { req->send(503); return; }
+  if (restrictToWifiSetup()) {
+    req->send(403, "application/json", "{\"error\":\"Wi-Fi setup only; CLI requires authenticated LAN maintenance\"}");
+    return;
+  }
   if (!checkAuth(req)) { req->send(401, "application/json", "{\"error\":\"auth\"}"); return; }
   if (!req->hasParam("reqid")) {
     req->send(400, "application/json", "{\"error\":\"bad reqid\"}");
@@ -1508,7 +1595,7 @@ void WebConfigServer::handleScan(AsyncWebServerRequest* req) {
     n = WIFI_SCAN_FAILED;
   }
   if (n == WIFI_SCAN_FAILED) {
-    WiFi.scanNetworks(true);
+    WiFi.scanNetworks(true, false, false, 600);
     req->send(200, "application/json", "{\"state\":\"scanning\"}");
     return;
   }

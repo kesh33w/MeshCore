@@ -6,6 +6,9 @@ namespace mesh {
 
 Packet::Packet() {
   header = 0;
+  _peer_ingress = false;
+  _peer_deadline = 0;
+  _snr = 0;
   path_len = 0;
   payload_len = 0;
 }
@@ -63,6 +66,8 @@ uint8_t Packet::writeTo(uint8_t dest[]) const {
 }
 
 bool Packet::readFrom(const uint8_t src[], uint8_t len) {
+  _peer_ingress = false;
+  _peer_deadline = 0;
   uint8_t i = 0;
   header = src[i++];
   if (hasTransportCodes()) {

@@ -82,7 +82,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       uint32_t ack_crc;
       memcpy(&ack_crc, &pkt->payload[i], 4); i += 4;
       if (i <= pkt->payload_len) {
-        onAckRecv(pkt, ack_crc);
+        if (!pkt->isPeerIngress()) onAckRecv(pkt, ack_crc);
       }
     }
 
@@ -122,7 +122,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete ACK packet", getLogDateTime());
       } else if (!_tables->wasSeen(pkt)) {
         _tables->markSeen(pkt);
-        onAckRecv(pkt, ack_crc);
+        if (!pkt->isPeerIngress()) onAckRecv(pkt, ack_crc);
         action = routeRecvPacket(pkt);
       }
       break;
@@ -144,7 +144,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         //       For flood mode, the path may not be the 'best' in terms of hops.
         // FUTURE: could send back multiple paths, using createPathReturn(), and let sender choose which to use(?)
 
-        if (self_id.isHashMatch(&dest_hash)) {
+        if (!pkt->isPeerIngress() && self_id.isHashMatch(&dest_hash)) {
           // scan contacts DB, for all matching hashes of 'src_hash' (max 4 matches supported ATM)
           int num = searchPeersByHash(&src_hash);
           // for each matching contact, try to decrypt data
@@ -204,7 +204,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
       } else if (!_tables->wasSeen(pkt)) {
         _tables->markSeen(pkt);
-        if (self_id.isHashMatch(&dest_hash)) {
+        if (!pkt->isPeerIngress() && self_id.isHashMatch(&dest_hash)) {
           Identity sender(sender_pub_key);
 
           uint8_t secret[PUB_KEY_SIZE];
@@ -234,7 +234,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         _tables->markSeen(pkt);
         // scan channels DB, for all matching hashes of 'channel_hash' (max 4 matches supported ATM)
         GroupChannel channels[4];
-        int num = searchChannelsByHash(&channel_hash, channels, 4);
+        int num = pkt->isPeerIngress() ? 0 : searchChannelsByHash(&channel_hash, channels, 4);
         // for each matching channel, try to decrypt data
         for (int j = 0; j < num; j++) {
           // decrypt, checking MAC is valid
@@ -314,7 +314,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
             uint32_t ack_crc;
             memcpy(&ack_crc, tmp.payload, 4);
 
-            onAckRecv(&tmp, ack_crc);
+            if (!pkt->isPeerIngress()) onAckRecv(&tmp, ack_crc);
             //action = routeRecvPacket(&tmp);  // NOTE: currently not needed, as multipart ACKs not sent Flood
           }
         } else {
@@ -382,6 +382,8 @@ void Mesh::routeDirectRecvAcks(Packet* packet, uint32_t delay_millis) {
     while (extra > 0) {
       auto a1 = createMultiAck(packet->payload, packet->payload_len, extra);
       if (a1) {
+        a1->_peer_ingress = packet->_peer_ingress;
+        a1->_peer_deadline = packet->_peer_deadline;
         a1->path_len = Packet::copyPath(a1->path, packet->path, packet->path_len);
         a1->header &= ~PH_ROUTE_MASK;
         a1->header |= ROUTE_TYPE_DIRECT;
@@ -393,6 +395,8 @@ void Mesh::routeDirectRecvAcks(Packet* packet, uint32_t delay_millis) {
 
     auto a2 = createAck(packet->payload, packet->payload_len);
     if (a2) {
+      a2->_peer_ingress = packet->_peer_ingress;
+      a2->_peer_deadline = packet->_peer_deadline;
       a2->path_len = Packet::copyPath(a2->path, packet->path, packet->path_len);
       a2->header &= ~PH_ROUTE_MASK;
       a2->header |= ROUTE_TYPE_DIRECT;

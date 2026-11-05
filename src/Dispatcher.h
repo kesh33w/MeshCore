@@ -228,6 +228,11 @@ public:
   unsigned long futureMillis(int millis_from_now) const;
 
   bool tryParsePacket(Packet* pkt, const uint8_t* raw, int len);
+#ifdef PRIVATE_REMOTE_CAPTURE
+  // RF-loop only. Caller must authenticate peer, route, expiry and replay first.
+  // True means handed to native routing, not radio TX or recipient delivery.
+  bool receivePeerPacket(const uint8_t* raw, size_t len, uint32_t max_age_ms=5000);
+#endif
 
 private:
   void checkRecv();

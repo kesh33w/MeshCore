@@ -240,6 +240,10 @@ body.tab-cli{padding-bottom:0}
 
 <!-- ============ SETUP WIZARD ============ -->
 <section id="v-wizard" class="hide">
+  <div class="card hide" id="private-setup-warning">
+    <h2>Device preparation incomplete</h2>
+    <p>This device needs maintainer setup before you connect it to WiFi. Contact the person who prepared it. You do not need to choose radio or MQTT settings.</p>
+  </div>
   <div class="note" id="cna-note">In the WiFi sign-in popup? It closes if your phone sleeps.
     <a href="#" onclick="popOut();return false" style="white-space:nowrap">Open in your browser</a> to keep your progress.</div>
   <div class="steps"><i id="stp1" class="on"></i><i id="stp2"></i><i id="stp3"></i><i id="stp4"></i></div>
@@ -645,7 +649,7 @@ function boot(){
     // Show only as many server slots as the board can keep active at once
     // (active_slots: 2 without PSRAM, 5 with). Fall back to the runtime array
     // size for older firmware that doesn't report it.
-    st.mode=s.mode;st.authed=s.auth;st.needsSetup=!!s.needs_setup;st.nslots=s.active_slots||s.runtime_slots||6;
+    st.setupBlocker=s.private_setup_blocker||"";st.wifiOnly=!!s.wifi_only_setup;st.mode=s.mode;st.authed=s.auth;st.needsSetup=!!s.needs_setup;st.nslots=s.active_slots||s.runtime_slots||6;
     if(s.max_cmds>0)CLI_MAX=s.max_cmds;
     st.fw=s.fw||"";st.build=s.build_date||"";st.role=s.role||"";st.board=s.board||"";
     // Board-specific CLI commands this node answered for at startup. Controls
@@ -1324,7 +1328,26 @@ function wzRadioSel(sel){
 }
 function showWizard(){
   show("#v-wizard");
-  loadConfig().then(wzRadioFill).catch(function(){});
+  if(st.setupBlocker){
+    $("#private-setup-warning").classList.remove("hide");
+    $("#v-wizard .steps").classList.add("hide");
+    [1,2,3,4].forEach(function(i){$("#wz"+i).classList.add("hide")});
+    $("#v-wizard > p a").textContent="Maintainer settings";
+    return;
+  }
+  loadConfig().then(function(){
+    wzRadioFill();
+    if(st.wifiOnly){
+      $("#v-wizard .steps").classList.add("hide");
+      $("#wz1 h2").textContent="Connect to WiFi";
+      $("#wz1 p").textContent="Your bridge is preconfigured. Choose your local 2.4 GHz WiFi network.";
+      $('#wz1 [data-k="name"]').closest(".f").classList.add("hide");
+      var next=$("#wz1 > button");next.textContent="Review";next.onclick=function(){wzGo(4)};
+      $("#wz4 h2").textContent="Review and connect";
+      $("#wz4 .note").textContent="To change WiFi later, hold the device's USER button for one second, then release it.";
+      $("#wz4 .btn.sec").onclick=function(){wzGo(1)};
+    }
+  }).catch(function(){});
 }
 function wzGo(n){
   [1,2,3,4].forEach(function(i){
@@ -1338,7 +1361,12 @@ function wzGo(n){
     var nm=st.dirty.name||st.orig.name||"";
     if(o&&!o.value&&nm){o.value=nm;o.dispatchEvent(new Event("input",{bubbles:true}))}
   }
-  if(n===4)buildReview();
+  if(n===4){
+    if(st.wifiOnly && eff("wifi.ssid")!==st.orig["wifi.ssid"] && eff("wifi.pwd")==="********"){
+      toast("Enter the password for the new network, or clear it for an open network.");wzGo(1);return;
+    }
+    buildReview();
+  }
   window.scrollTo(0,0);
 }
 function popOut(){
@@ -1373,6 +1401,10 @@ function buildReview(){
   var pwdChanged=("wifi.pwd" in d);
   row("WiFi password",pwdChanged?(d["wifi.pwd"]?"••••••":"(open network)")
                                 :(st.orig["wifi.pwd"]?"(unchanged)":"(open network)"));
+  if(st.wifiOnly){
+    row("Bridge settings","Preconfigured, unchanged");
+    $("#wz-review").innerHTML=rows.join("");return;
+  }
   var nm=eff("name");if(nm)row("Node name",nm);
   var rc=eff("radio")||"",rp=null;
   RADIO_PRESETS.forEach(function(p){if(comboEq(presetCombo(p),rc))rp=p});
@@ -1398,7 +1430,7 @@ function wizardSave(){
   // Use the effective value: a user who cleared the SSID must fail validation
   // even if the node originally had one (the batch would submit an empty SSID).
   if(!eff("wifi.ssid")){$("#wz-err").textContent="Please set a WiFi network (step 1).";return}
-  if($("#wz-rp").value===""){$("#wz-err").textContent="Please choose a radio preset (step 2) — nodes ship with non-US defaults.";return}
+  if(!st.wifiOnly&&$("#wz-rp").value===""){$("#wz-err").textContent="Please choose a radio preset (step 2) — nodes ship with non-US defaults.";return}
   var pwdErr=adminPwdError(true);  // the wizard always saves WiFi and reboots
   if(pwdErr){$("#wz-err").textContent=pwdErr+" (step 2).";return}
   // IATA is optional, but if given it must be exactly 3 chars (goes into topics).
@@ -1412,7 +1444,7 @@ function wizardSave(){
       if(acked){
         // The node accepted the batch (202): it applies the settings and
         // reboots on its own even though we couldn't read the confirmation.
-        showReboot("The confirmation reply was lost, but the node accepted the settings — its screen shows “Config saved!” and it reboots by itself within 30 seconds. Reconnect your phone or laptop to your normal WiFi. Find the node's IP on your router, or run “start webconfig” over serial to manage it again.",
+        showReboot(st.wifiOnly ? "The device accepted the settings, but the save confirmation was lost. Check its screen for Config saved and a restart, then WiFi: connected and Link: authenticated. A short USER press wakes the screen. If setup stays open, reconnect to its setup WiFi and retry." : "The confirmation reply was lost, but the node accepted the settings — its screen shows “Config saved!” and it reboots by itself within 30 seconds. Reconnect your phone or laptop to your normal WiFi. Find the node's IP on your router, or run “start webconfig” over serial to manage it again.",
           false,"Settings sent ✓ — node rebooting");
         st.dirty={};
         return;
@@ -1424,6 +1456,11 @@ function wizardSave(){
     if(fails.length){
       $("#wz-err").textContent=fails.map(function(x){return x.key+": "+x.reply}).join(" · ");
       return;
+    }
+    if(st.wifiOnly){
+      showReboot("WiFi settings saved. Reconnect your phone to your normal WiFi. Check the device screen for WiFi: connected and Link: authenticated. Link: connecting or syncing time means it is still connecting. A short USER press wakes the screen.",
+        false,"Settings saved - check device status");
+      st.dirty={};return;
     }
     showReboot("The node is joining “"+eff("wifi.ssid")
       +"”. Reconnect your phone or laptop to your normal WiFi. Find the node's IP on your router, or run “start webconfig” over serial to manage it again"
@@ -1444,6 +1481,10 @@ function showReboot(msg,reconnect,title){
   $("#reboot-title").textContent=title||"Rebooting…";
   $("#reboot-msg").textContent=msg;
   $("#reboot-ov").classList.add("show");
+  // The setup AP goes away on reboot. This page cannot observe the new link.
+  // Point to the device instead of implying a countdown proves readiness.
+  $("#reboot-ov .spin").classList.toggle("hide",!!st.wifiOnly&&!reconnect);
+  if(st.wifiOnly&&!reconnect){$("#reboot-count").textContent="";return}
   var n=30;$("#reboot-count").textContent=n;
   var t=setInterval(function(){
     n--;$("#reboot-count").textContent=n>0?n:"";

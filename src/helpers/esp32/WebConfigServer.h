@@ -90,9 +90,12 @@ public:
 
   Mode mode() const { return _mode; }
   bool isRunning() const { return _mode != MODE_OFF; }
-  bool isStopping() const { return _stopping; }
+  bool isStopping() const { return _stopping || _stop_after_batch; }
 
 private:
+  bool hasPrivateSetupDefaults() const;
+  bool restrictToWifiSetup() const;
+  const char* privateSetupBlocker() const;
   // Batch/reboot/stop decisions and timings live in the fork-owned pure spec
   // WebConfigBatch.h (host-tested by test/test_webconfig_batch). These aliases
   // keep a single source of truth so the spec and this server cannot drift.
@@ -139,6 +142,7 @@ private:
   SemaphoreHandle_t _mux;
   Mode _mode = MODE_OFF;
   bool _stopping = false;
+  bool _stop_after_batch = false;
   bool _was_setup_ap = false;
   bool _initial_setup = false;
   bool _network_locked = false;

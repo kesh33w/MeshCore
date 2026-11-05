@@ -1,3 +1,6 @@
+#ifdef PRIVATE_OBSERVER_BASE
+#include "helpers/PrivateLinkState.h"
+#endif
 #include "MQTTBridge.h"
 #include "MQTTErrorLabels.h"
 #include "../WifiPowerSavePolicy.h"
@@ -1145,6 +1148,9 @@ void MQTTBridge::begin() {
   // above already free what they acquired and leave the bridge Stopped, so we
   // must not also fire the state machine's release effect there (double free).
   // A fresh start also clears any dirty-stop latch (re-enabling OTA flashing).
+#ifdef PRIVATE_OBSERVER_BASE
+  private_remote::network_allowed().store(true);
+#endif
   _lifecycle.requestStart();    // Stopped -> Starting (startTask() is a no-op here)
   _lifecycle.onTaskStarted();   // Starting -> Running
 
@@ -1157,6 +1163,9 @@ void MQTTBridge::begin() {
 // end()
 // ---------------------------------------------------------------------------
 void MQTTBridge::end() {
+#ifdef PRIVATE_OBSERVER_BASE
+  private_remote::stop_network();
+#endif
   MQTT_DEBUG_PRINTLN("Stopping MQTT Bridge...");
 
   // Idempotent stop: nothing to tear down if we never started (or already stopped).
@@ -1462,8 +1471,13 @@ void MQTTBridge::mqttTaskLoop() {
     // retry below; re-arming here on every loop would make a blocked NTP path
     // run the multi-second sync sequence back-to-back forever.
     const bool network_connected = _network->isConnected();
+#ifdef PRIVATE_OBSERVER_BASE
+    const bool boot_time_ready = _ntp_synced && private_remote::fresh_time().load();
+#else
+    const bool boot_time_ready = _ntp_synced;
+#endif
     _ntp_sync_pending = NetworkPolicy::ntpPendingAfterConnectivitySample(
-        _ntp_synced, _ntp_sync_pending, network_was_connected,
+        boot_time_ready, _ntp_sync_pending, network_was_connected,
         network_connected);
     network_was_connected = network_connected;
     if (_ntp_sync_pending && network_connected) {
@@ -1474,7 +1488,7 @@ void MQTTBridge::mqttTaskLoop() {
 
     // Retry NTP every 30s if initial sync failed (slots can't start without valid time)
     if (NetworkPolicy::ntpRetryDue(
-            _ntp_synced, network_connected, (uint32_t)now,
+            boot_time_ready, network_connected, (uint32_t)now,
             (uint32_t)last_ntp_attempt)) {
       last_ntp_attempt = now;
       syncTimeWithNTP();
@@ -1511,6 +1525,9 @@ void MQTTBridge::mqttTaskLoop() {
       MQTT_DEBUG_PRINTLN("mbedTLS allocator redirected to PSRAM");
       #endif
 
+#ifdef PRIVATE_OBSERVER_BASE
+      private_remote::tls_allocator_ready().store(true);
+#endif
       MQTT_DEBUG_PRINTLN("NTP synced, setting up MQTT slots (max %d active)...", _max_active_slots);
       for (int i = 0; i < RUNTIME_MQTT_SLOTS; i++) {
         if (_slots[i].enabled) {
@@ -4766,7 +4783,10 @@ bool MQTTBridge::syncTimeWithNTP(bool force, bool primary_only, int attempts_per
     struct timeval accepted;
     accepted.tv_sec = (time_t)epochTime;
     accepted.tv_usec = 0;
-    settimeofday(&accepted, nullptr);
+    const int time_result = settimeofday(&accepted, nullptr);
+#ifdef PRIVATE_OBSERVER_BASE
+    private_remote::accept_time(ntp_server_used != nullptr, time_result);
+#endif
 
     // Keep the process timezone at UTC without starting lwIP's SNTP. This used
     // to be configTime(0, 0, ntp_server_used), whose timezone side effect is all

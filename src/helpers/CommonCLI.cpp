@@ -1278,6 +1278,10 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
 #endif
     } else if (memcmp(command, "start ota", 9) == 0 &&
                (command[9] == 0 || command[9] == ' ')) {
+#ifdef PRIVATE_OBSERVER_BASE
+      strcpy(reply, "ERR: private trial uses USB updates");
+      return;
+#endif
       // Manual OTA: bring up the ElegantOTA web UI for a hand-uploaded binary.
       // Plain "start ota" serves on the station IP when joined to WiFi, else
       // raises the MeshCore-OTA SoftAP. "start ota ap" forces the SoftAP even

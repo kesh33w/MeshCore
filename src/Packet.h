@@ -1,6 +1,7 @@
 #pragma once
 
 #include <MeshCore.h>
+#include <math.h>  // NAN for peer ingress without an RF signal measurement.
 
 namespace mesh {
 
@@ -49,6 +50,9 @@ public:
   uint8_t path[MAX_PATH_SIZE];
   uint8_t payload[MAX_PACKET_PAYLOAD];
   int8_t _snr;
+  uint32_t _peer_deadline;  // Monotonic expiry for peer-derived outbound work.
+  bool _peer_ingress;  // Local provenance only, never serialized.
+  bool isPeerIngress() const { return _peer_ingress; }
 
   /**
    * \brief calculate the hash of payload + type
@@ -89,7 +93,7 @@ public:
   void markDoNotRetransmit() { header = 0xFF; }
   bool isMarkedDoNotRetransmit() const { return header == 0xFF; }
 
-  float getSNR() const { return ((float)_snr) / 4.0f; }
+  float getSNR() const { return _peer_ingress ? NAN : ((float)_snr) / 4.0f; }
 
   /**
    * \returns  the encoded/wire format length of this packet

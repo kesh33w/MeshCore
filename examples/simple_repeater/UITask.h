@@ -16,7 +16,15 @@
   #include <helpers/ui/CHSC6XTouch.h>
 #endif
 
+#ifdef TFT_WIFI_SETUP
+#include <helpers/ui/TouchWifiSetup.h>
+#endif
+
 class UITask {
+#ifdef TFT_WIFI_SETUP
+  TouchWifiSetup _wifi_touch;
+  TouchWifiCallbacks* _wifi_callbacks = nullptr;
+#endif
   mesh::MainBoard* _board;
   DisplayDriver* _display;
   unsigned long _next_read, _next_refresh, _auto_off;
@@ -76,4 +84,12 @@ public:
 #endif
 
   void loop();
+#ifdef TFT_WIFI_SETUP
+  void setTouchWifiCallbacks(TouchWifiCallbacks* cb) { _wifi_callbacks = cb; }
+#ifdef TFT_WIFI_SETUP_BENCH
+  void touchBench(const char* action, char* reply) {
+    _wifi_touch.bench(action, _observer_prefs->wifi_ssid, _observer_prefs->wifi_password, reply);
+  }
+#endif
+#endif
 };

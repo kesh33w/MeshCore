@@ -182,6 +182,7 @@ void Dispatcher::loop() {
 bool Dispatcher::tryParsePacket(Packet* pkt, const uint8_t* raw, int len) {
   int i = 0;
 
+  pkt->_peer_ingress = false;
   pkt->header = raw[i++];
   if (pkt->getPayloadVer() > PAYLOAD_VER_1) {
     MESH_DEBUG_PRINTLN("%s Dispatcher::checkRecv(): unsupported packet version", getLogDateTime());
@@ -339,6 +340,11 @@ void Dispatcher::checkSend() {
 
   outbound = _mgr->getNextOutbound(_ms->getMillis());
   if (outbound) {
+    if (outbound->_peer_ingress && int32_t(uint32_t(_ms->getMillis()) - outbound->_peer_deadline) >= 0) {
+      releasePacket(outbound);
+      outbound = NULL;
+      return;  // Expiry is not a failed TX and never starts the radio.
+    }
     int len = 0;
     uint8_t raw[MAX_TRANS_UNIT];
 
@@ -393,6 +399,8 @@ Packet* Dispatcher::obtainNewPacket() {
   } else {
     pkt->payload_len = pkt->path_len = 0;
     pkt->_snr = 0;
+    pkt->_peer_ingress = false;
+    pkt->_peer_deadline = 0;
   }
   return pkt;
 }
@@ -421,3 +429,45 @@ unsigned long Dispatcher::futureMillis(int millis_from_now) const {
 }
 
 }
+#ifdef PRIVATE_REMOTE_CAPTURE
+namespace mesh {
+bool Dispatcher::receivePeerPacket(const uint8_t* raw, size_t len, uint32_t max_age_ms) {
+  if (!max_age_ms || max_age_ms > 60000) return false;
+  if (!raw || len < 3 || len > 254 || (raw[0] >> 6) != 0) return false;
+  const uint8_t route = raw[0] & 3;
+  const size_t index = (route == 0 || route == 3) ? 5 : 1;
+  if (len <= index) return false;
+  const uint8_t encoded = raw[index], width = (encoded >> 6) + 1;
+  const size_t path_bytes = (encoded & 63) * width;
+  const size_t offset = index + 1 + path_bytes;
+  if ((width != 2 && width != 3) || path_bytes > MAX_PATH_SIZE || offset >= len || len-offset > MAX_PACKET_PAYLOAD) return false;
+  const size_t payload = len-offset;
+  switch ((raw[0] >> 2) & 15) {
+    case PAYLOAD_TYPE_GRP_TXT:
+    case PAYLOAD_TYPE_GRP_DATA:
+      if (payload < 19 || (payload-3)%16) return false;
+      break;
+    case PAYLOAD_TYPE_TXT_MSG:
+    case PAYLOAD_TYPE_PATH:
+      if (payload < 20 || (payload-4)%16) return false;
+      break;
+    case PAYLOAD_TYPE_ACK:
+      if (payload != 4 && payload != 6) return false;
+      break;
+    default:
+      // TRACE/control/admin/unknown payloads may need real RF signal metadata.
+      // They are unsupported in this initial peer ingress implementation.
+      return false;
+  }
+  Packet* pkt = obtainNewPacket();
+  if (!pkt) return false;
+  if (!tryParsePacket(pkt, raw, int(len))) { releasePacket(pkt); return false; }
+  pkt->_peer_ingress = true;
+  pkt->_peer_deadline = uint32_t(_ms->getMillis()) + max_age_ms;
+  // No radio RX hook, signal score, RX counters or fabricated RSSI/SNR.
+  // Native policy/path/dedup decides release or outbound queue admission.
+  processRecvPacket(pkt);
+  return true;
+}
+}
+#endif

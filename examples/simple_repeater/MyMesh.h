@@ -91,7 +91,13 @@ struct NeighbourInfo {
 
 #define PACKET_LOG_FILE  "/packet_log"
 
+#ifdef TFT_WIFI_SETUP
+#include <helpers/ui/TouchWifiModel.h>
+#endif
 class MyMesh : public mesh::Mesh, public CommonCLICallbacks
+#ifdef TFT_WIFI_SETUP
+    , public TouchWifiCallbacks
+#endif
 #ifdef WITH_WEBCONFIG
     , public WebConfigServer::Callbacks
 #endif
@@ -148,6 +154,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks
   AlertReporter _alerter;
 #endif
 #ifdef WITH_WEBCONFIG
+#ifdef TFT_WIFI_SETUP
+  bool _touch_network_owned = false;
+  bool _touch_setup_boot = false;
+#endif
   WebConfigServer* _webconfig = NULL;  // heap-allocated while running, freed on stop
   bool _wc_batch_active = false;       // coalesce bridge restarts during a config batch
   bool _wc_restart_pending = false;
@@ -545,6 +555,16 @@ public:
     return false;
   }
   void buildStatsJson(char* buf, size_t buf_size) override;
+#endif
+
+#ifdef TFT_WIFI_SETUP
+  bool touchSetupAllowed() override;
+  bool touchPrepareConnection() override;
+  bool touchStartConnection(const char* ssid, const char* password) override;
+  bool touchConnectionReady() override;
+  void touchCancelConnection() override;
+  bool touchSaveCredentials(const char* ssid, const char* password) override;
+  void touchRestart(bool setup) override;
 #endif
 
   // To check if there is pending work

@@ -2,6 +2,11 @@
 #include <Mesh.h>
 
 #include "MyMesh.h"
+#ifdef PRIVATE_INSTALL_IDENTITY
+#include "InstallCredentials.h"
+#include "AutoEnrollment.h"
+#include <nvs_flash.h>
+#endif
 
 #ifdef DISPLAY_CLASS
   #include "UITask.h"
@@ -75,7 +80,15 @@ void setup() {
   fs = &InternalFS;
   IdentityStore store(InternalFS, "");
 #elif defined(ESP32)
+#ifdef PRIVATE_INSTALL_IDENTITY
+  // Never erase installed credentials when a mount fails during an upgrade.
+  if (!SPIFFS.begin(false)) {
+    Serial.println("Install storage unavailable. Initialize filesystem only for a new installation.");
+    halt();
+  }
+#else
   SPIFFS.begin(true);
+#endif
   fs = &SPIFFS;
   IdentityStore store(SPIFFS, "/identity");
 #elif defined(RP2040_PLATFORM)
@@ -111,12 +124,25 @@ void setup() {
 
   sensors.begin();
 
+#ifdef PRIVATE_INSTALL_IDENTITY
+  const esp_err_t nvs_result=nvs_flash_init();
+  if(nvs_result!=ESP_OK) Serial.printf("Enrollment: NVS initialization failed: %s\n",esp_err_to_name(nvs_result));
+  // Wi-Fi credentials are stored in the observer preferences, not SDK NVS.
+  WiFi.persistent(false);
+  if(!private_remote::enrollment_prepare_at_boot()) Serial.println("Enrollment: bootstrap unavailable");
+#endif
   the_mesh.begin(fs);
+#ifdef PRIVATE_INSTALL_IDENTITY
+  private_remote::start_enrollment();
+#endif
 
 #ifdef DISPLAY_CLASS
   if (display_ready) {
 #ifdef WITH_MQTT_BRIDGE
     ui_task.setObserverPrefs(the_mesh.getObserverPrefs());
+#endif
+#ifdef TFT_WIFI_SETUP
+    ui_task.setTouchWifiCallbacks(&the_mesh);
 #endif
     ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #ifdef DISPLAY_ACTIVITY_DASHBOARD
@@ -138,6 +164,9 @@ void setup() {
 }
 
 void loop() {
+#ifdef PRIVATE_INSTALL_IDENTITY
+  private_remote::start_enrollment();
+#endif
   board.maintainOTAUpdate(millis());
 
   // Handle Serial CLI
@@ -154,7 +183,9 @@ void loop() {
     if (c != '\n') {
       command[len++] = c;
       command[len] = 0;
+#ifndef PRIVATE_INSTALL_IDENTITY
       Serial.print(c);
+#endif
     }
     if (c == '\r') break;
   }
@@ -173,6 +204,17 @@ void loop() {
       the_mesh.handleCommand(0, command, reply);
     }
 #else
+#ifdef TFT_WIFI_SETUP_BENCH
+    if (!strncmp(command, "touch bench ", 12)) ui_task.touchBench(command+12, reply);
+    else
+#endif
+#ifdef PRIVATE_INSTALL_IDENTITY
+    if (!strcmp(command, "install admin")) {
+      const char* admin=private_remote::installed_admin();
+      if (!admin) admin=private_remote::enrollment_admin();
+      snprintf(reply,sizeof(reply),"INSTALL ADMIN %s",admin ? admin : "UNAVAILABLE");
+    } else if (!private_remote::install_usb_command(command, reply))
+#endif
     the_mesh.handleCommand(0, command, reply);  // NOTE: there is no sender_timestamp via serial!
 #endif
     if (reply[0]) {

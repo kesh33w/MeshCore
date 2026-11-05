@@ -1,3 +1,19 @@
+#ifdef PRIVATE_OBSERVER_BASE
+#include "ObserverPrivateLink.h"
+#ifdef PRIVATE_INSTALL_IDENTITY
+#include "AutoEnrollment.h"
+#endif
+#include "PrivateSetup.h"
+#include <esp_system.h>
+namespace private_remote {
+RTC_NOINIT_ATTR uint32_t setup_cookie;
+bool setup_boot = false;
+void request_setup_restart() {
+  setup_cookie = setup_cookie_value;
+  ESP.restart();
+}
+}
+#endif
 #include "MyMesh.h"
 #include <algorithm>
 #include <climits>
@@ -529,6 +545,9 @@ const char *MyMesh::getLogDateTime() {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+#ifdef PRIVATE_OBSERVER_BASE
+  private_remote::observer_private_link().capture(snr,rssi,raw,len);
+#endif
 #if MESH_PACKET_LOGGING
   if (Serial.availableForWrite() > 0) {
     Serial.print(getLogDateTime());
@@ -1056,6 +1075,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.bw = LORA_BW;
   _prefs.cr = LORA_CR;
   _prefs.tx_power_dbm = LORA_TX_POWER;
+#if defined(PRIVATE_INSTALL_IDENTITY) && defined(PRIVATE_OBSERVER_BASE)
+  _prefs.path_hash_mode = PRIVATE_PATH_HASH_BYTES - 1;
+#endif
   _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
   _prefs.flood_advert_interval = 47; // 47 hours
   _prefs.flood_max = 64;
@@ -1151,6 +1173,32 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
+#ifdef PRIVATE_INSTALL_IDENTITY
+  if (!strcmp(_prefs.password,"password")) {
+    const char* installed_password=private_remote::installed_admin();
+    if (!installed_password) installed_password=private_remote::enrollment_admin();
+    if(installed_password) StrHelper::strncpy(_prefs.password,installed_password,sizeof(_prefs.password));
+  }
+#endif
+#ifdef PRIVATE_OBSERVER_BASE
+  private_remote::setup_boot = private_remote::consume_setup_cookie(
+      private_remote::setup_cookie, esp_reset_reason() == ESP_RST_SW);
+  const bool private_setup_requested = private_remote::wifi_setup_required(
+      private_remote::setup_boot, _cli.getObserverPrefs()->wifi_ssid);
+#ifdef TFT_WIFI_SETUP
+  _touch_setup_boot = private_setup_requested;
+#endif
+  private_remote::observer_private_link().setup();
+#ifndef PRIVATE_INSTALL_IDENTITY
+  _prefs.freq=LORA_FREQ; _prefs.bw=LORA_BW; _prefs.sf=LORA_SF; _prefs.cr=LORA_CR;
+  _prefs.tx_power_dbm=LORA_TX_POWER;
+#endif
+  _prefs.advert_interval=0; _prefs.flood_advert_interval=0;
+  _prefs.powersaving_enabled=0;
+#ifndef PRIVATE_INSTALL_IDENTITY
+  _prefs.path_hash_mode=PRIVATE_PATH_HASH_BYTES-1;
+#endif
+#endif
 
 #ifdef SIM_WIFI_SSID
   // Emulator builds (Wokwi) boot with fresh NVS every run. Seed WiFi so the
@@ -1246,6 +1294,9 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #endif
 #endif
 
+#ifdef PRIVATE_OBSERVER_BASE
+      if (!private_setup_requested)
+#endif
       bridge->begin();
     }
   }
@@ -1263,9 +1314,19 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #if defined(WITH_WEBCONFIG) && !defined(WEBCONFIG_NO_AUTO_AP)
   // Existing Wi-Fi installs are complete by virtue of their stored SSID. An
   // Ethernet-only install uses the explicit completion marker instead.
-  if (!mqttNetworkSetupComplete(_cli.getObserverPrefs())) {
+  if (
+#ifdef PRIVATE_OBSERVER_BASE
+      private_setup_requested ||
+#endif
+      !mqttNetworkSetupComplete(_cli.getObserverPrefs())) {
     char wc_reply[160];
-    startWebConfig(false, wc_reply);
+    startWebConfig(
+#ifdef PRIVATE_OBSERVER_BASE
+        private_setup_requested,
+#else
+        false,
+#endif
+        wc_reply);
     Serial.println(wc_reply);
   }
 #endif
@@ -1749,6 +1810,9 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 }
 
 void MyMesh::loop() {
+#ifdef PRIVATE_OBSERVER_BASE
+  private_remote::observer_private_link().loop(*this);
+#endif
   // Check radio FIRST to ensure we don't miss incoming packets
   // MQTT processing runs in a separate FreeRTOS task on Core 0, so we don't call bridge.loop() here
   mesh::Mesh::loop();
@@ -1841,6 +1905,15 @@ void MyMesh::loop() {
     if (!_webconfig->isRunning() && !_webconfig->isStopping()) {
       delete _webconfig;   // teardown finished (or start failed): reclaim the heap
       _webconfig = NULL;
+#ifdef PRIVATE_OBSERVER_BASE
+      // Restore normal networking on cancel, timeout or AP startup failure.
+      // The consumed cookie is already clear, so this cannot reopen setup.
+      if (private_remote::setup_boot
+#ifdef TFT_WIFI_SETUP
+          && !_touch_network_owned
+#endif
+      ) ESP.restart();
+#endif
     }
   }
 #endif
@@ -2405,3 +2478,58 @@ bool MyMesh::hasPendingWork() const {
 #endif
   return _mgr->getOutboundCount(0xFFFFFFFF) > 0;
 }
+
+#ifdef TFT_WIFI_SETUP
+bool MyMesh::touchSetupAllowed() {
+  return _touch_setup_boot && private_remote::setup_password_ready(_prefs.password) &&
+         (!bridge || !bridge->isRunning());
+}
+bool MyMesh::touchPrepareConnection() {
+  if (!touchSetupAllowed() || _wc_batch_active) return false;
+  _touch_network_owned = true;
+  if (_webconfig) {
+    if (!_webconfig->isStopping()) _webconfig->requestStop();
+    return false;
+  }
+  return true;
+}
+bool MyMesh::touchStartConnection(const char* ssid, const char* password) {
+  if (!touchSetupAllowed() || !_touch_network_owned || _webconfig ||
+      activeNetworkLink().medium() != NetworkMedium::WiFi) return false;
+  WiFi.persistent(false); // Trial credentials remain RAM-only until verified save.
+  return activeNetworkLink().begin(ssid, password);
+}
+bool MyMesh::touchConnectionReady() {
+  activeNetworkLink().maintain(millis(), _cli.getObserverPrefs()->wifi_power_save);
+  return activeNetworkLink().isConnected() && activeNetworkLink().localIP()!=IPAddress();
+}
+void MyMesh::touchCancelConnection() {
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false, false);
+  activeNetworkLink().updateWifiCredentials("", "");
+}
+bool MyMesh::touchSaveCredentials(const char* ssid, const char* password) {
+  if (!touchSetupAllowed() || _webconfig ||
+      !TouchWifiModel::validCredentials(ssid, password)) return false;
+  auto* prefs = _cli.getObserverPrefs();
+  static_assert(sizeof(prefs->wifi_ssid)==32 && sizeof(prefs->wifi_password)==64, "Update touch credential limits with observer storage");
+  char old_ssid[sizeof(prefs->wifi_ssid)], old_password[sizeof(prefs->wifi_password)];
+  memcpy(old_ssid, prefs->wifi_ssid, sizeof(old_ssid));
+  memcpy(old_password, prefs->wifi_password, sizeof(old_password));
+  StrHelper::strncpy(prefs->wifi_ssid, ssid, sizeof(prefs->wifi_ssid));
+  StrHelper::strncpy(prefs->wifi_password, password, sizeof(prefs->wifi_password));
+  // Save the pair in the existing verified atomic /mqtt.json transaction.
+  const bool saved = _cli.saveObserverPrefs(_fs);
+  if (!saved) {
+    memcpy(prefs->wifi_ssid, old_ssid, sizeof(old_ssid));
+    memcpy(prefs->wifi_password, old_password, sizeof(old_password));
+  }
+  TouchWifiModel::wipe(old_password, sizeof(old_password));
+  TouchWifiModel::wipe(old_ssid, sizeof(old_ssid));
+  return saved;
+}
+void MyMesh::touchRestart(bool setup) {
+  if (setup) private_remote::request_setup_restart();
+  else _cli.getBoard()->reboot();
+}
+#endif

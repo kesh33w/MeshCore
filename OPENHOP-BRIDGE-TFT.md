@@ -21,7 +21,7 @@ PlatformIO downloads public dependencies and the Adafruit CA bundle. Generated c
 
 ## Automatic adverts, November 6, 2026
 
-The automatic-advert fix restores the existing MeshCore timers and saved interval settings. The TFT sends the standard zero-hop boot advert after 16 seconds. New installations start with the upstream 2-minute local interval and 47-hour flood interval. The existing CLI save policy disables a local interval below 60 minutes when settings are saved. For a configured installation, use `set advert.interval 60` and `set flood.advert.interval 47` to persist hourly local adverts and the standard flood interval.
+The automatic-advert fix restores the existing MeshCore timers and saved interval settings. The TFT sends the standard zero-hop boot advert after 16 seconds. New TFT installations start with a 60-minute local interval and the unchanged 47-hour flood interval. The existing CLI save policy disables a local interval below 60 minutes when settings are saved. For a configured installation, use `set advert.interval 60` and `set flood.advert.interval 47` to persist hourly local adverts and the standard flood interval.
 
 Saved intervals, including explicit zero, retain their meaning after reboot. An existing installation with both intervals saved as zero needs explicit nonzero settings to enable recurring adverts. This release does not silently replace those preferences.
 
@@ -32,3 +32,7 @@ The new merged image remains a full-erase installation at `0x0`; the previous No
 New TFT installations default to two-byte advert paths. `PRIVATE_PATH_HASH_BYTES=2` initializes `path.hash.mode=1`. The CLI mode is zero-based: mode0 means one byte, mode1 means two bytes, and mode2 means three bytes. Saved preferences remain adjustable and take precedence over the new-install default.
 
 The attached TFT reported mode1 after reboot, confirming two-byte advert paths. Standard zero-hop startup adverts contain no path hashes. Their empty-path encoding can still be shown as one-byte by packet inspectors; that does not change the configured width of flood advert paths.
+
+## Hourly local default update
+
+The TFT constructor now initializes the local interval to 60 minutes. This applies only before saved preferences load. Existing configured values, including intentional zero, remain unchanged. The flood default and saved flood intervals are unchanged. The attached TFT has a verified 60-minute local and 47-hour flood interval.

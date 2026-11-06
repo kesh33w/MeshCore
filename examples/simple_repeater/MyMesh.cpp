@@ -1078,7 +1078,11 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 #if defined(PRIVATE_INSTALL_IDENTITY) && defined(PRIVATE_OBSERVER_BASE)
   _prefs.path_hash_mode = PRIVATE_PATH_HASH_BYTES - 1;
 #endif
+#if defined(PRIVATE_INSTALL_IDENTITY) && defined(HELTEC_LORA_V4_TFT)
+  _prefs.advert_interval = 30;       // default to 60 minutes for new TFT installs
+#else
   _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
+#endif
   _prefs.flood_advert_interval = 47; // 47 hours
   _prefs.flood_max = 64;
   _prefs.flood_max_unscoped = 64;

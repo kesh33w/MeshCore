@@ -25,4 +25,10 @@ The automatic-advert fix restores the existing MeshCore timers and saved interva
 
 Saved intervals, including explicit zero, retain their meaning after reboot. An existing installation with both intervals saved as zero needs explicit nonzero settings to enable recurring adverts. This release does not silently replace those preferences.
 
-The new merged image remains a full-erase installation at `0x0`; the previous November 5 download remains available at its original URL. The endpoint, trust pin, RF defaults and host-rf route are unchanged. Validation covers a full TFT build, exact release-target preprocessing and image/partition checks. No RF or browser-flash test of this new application has been performed.
+The new merged image remains a full-erase installation at `0x0`; the previous November 5 download remains available at its original URL. The endpoint, trust pin, RF defaults and host-rf route are unchanged. Validation covers a full TFT build, exact release-target preprocessing and image/partition checks. An attached Heltec V4.3 TFT has also received an application-only update with the flash hash verified. Its existing identity, name, RF profile and MQTT origin were preserved. The advert intervals survived a reboot, and the Pi received its normal startup advert. The analyzer recognized the configured repeater name. Browser full-erase flashing remains unverified.
+
+## Path hash width
+
+New TFT installations default to two-byte advert paths. `PRIVATE_PATH_HASH_BYTES=2` initializes `path.hash.mode=1`. The CLI mode is zero-based: mode0 means one byte, mode1 means two bytes, and mode2 means three bytes. Saved preferences remain adjustable and take precedence over the new-install default.
+
+The attached TFT reported mode1 after reboot, confirming two-byte advert paths. Standard zero-hop startup adverts contain no path hashes. Their empty-path encoding can still be shown as one-byte by packet inspectors; that does not change the configured width of flood advert paths.

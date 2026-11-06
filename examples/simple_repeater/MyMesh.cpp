@@ -1193,7 +1193,6 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _prefs.freq=LORA_FREQ; _prefs.bw=LORA_BW; _prefs.sf=LORA_SF; _prefs.cr=LORA_CR;
   _prefs.tx_power_dbm=LORA_TX_POWER;
 #endif
-  _prefs.advert_interval=0; _prefs.flood_advert_interval=0;
   _prefs.powersaving_enabled=0;
 #ifndef PRIVATE_INSTALL_IDENTITY
   _prefs.path_hash_mode=PRIVATE_PATH_HASH_BYTES-1;

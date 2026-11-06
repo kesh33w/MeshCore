@@ -18,3 +18,11 @@ pio run -e sacmesh_v43_tft_touch
 ```
 
 PlatformIO downloads public dependencies and the Adafruit CA bundle. Generated certificate bundles, WebConfig HTML and local build products remain ignored. The public checkout built successfully on November 5 with the existing resolved dependency cache and a freshly downloaded public CA bundle. This verifies the source build contract, but does not establish a fresh dependency installation or bit-identical firmware.
+
+## Automatic adverts, November 6, 2026
+
+The automatic-advert fix restores the existing MeshCore timers and saved interval settings. The TFT sends the standard zero-hop boot advert after 16 seconds. New installations start with the upstream 2-minute local interval and 47-hour flood interval. The existing CLI save policy disables a local interval below 60 minutes when settings are saved. For a configured installation, use `set advert.interval 60` and `set flood.advert.interval 47` to persist hourly local adverts and the standard flood interval.
+
+Saved intervals, including explicit zero, retain their meaning after reboot. An existing installation with both intervals saved as zero needs explicit nonzero settings to enable recurring adverts. This release does not silently replace those preferences.
+
+The new merged image remains a full-erase installation at `0x0`; the previous November 5 download remains available at its original URL. The endpoint, trust pin, RF defaults and host-rf route are unchanged. Validation covers a full TFT build, exact release-target preprocessing and image/partition checks. No RF or browser-flash test of this new application has been performed.

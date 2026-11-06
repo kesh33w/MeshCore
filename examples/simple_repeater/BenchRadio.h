@@ -12,7 +12,6 @@
 #ifndef PRIVATE_INSTALL_IDENTITY
 #undef MAX_LORA_TX_POWER
 #endif
-#undef ENABLE_ADVERT_ON_BOOT
 #define LORA_FREQ 909.875f
 #define LORA_BW 62.5f
 #define LORA_SF 9
@@ -21,6 +20,5 @@
 #ifndef PRIVATE_INSTALL_IDENTITY
 #define MAX_LORA_TX_POWER 10
 #endif
-#define ENABLE_ADVERT_ON_BOOT 0
 #endif
 #endif
